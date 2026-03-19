@@ -1,6 +1,8 @@
 # Diagnosis Branches
 
-Read only the branch that matches the first divergence stage.
+Read only the branch that matches the first divergence stage. If none fits
+cleanly, reduce scope and go back to alignment plus first-divergence analysis
+instead of forcing a branch.
 
 ## Branch A: Step1 Loss Mismatch
 

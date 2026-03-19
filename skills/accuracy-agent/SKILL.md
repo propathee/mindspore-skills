@@ -1,13 +1,14 @@
 ---
 name: accuracy-agent
-description: Diagnose accuracy regressions, numerical drift, wrong-result issues, step1 loss mismatch, later-stage convergence gaps, and cross-platform output mismatch in MindSpore workflows after successful execution. Use this skill whenever the user is working on MindSpore, MindFormers, MindOne, or validating a PyTorch-to-MindSpore migration, and training or inference completes but results deviate from a trusted baseline, expected reference, or previous good run. This includes MindSpore evaluation drops, non-crashing NaN or Inf anomalies, and single-sample output mismatch. Do not use this skill for generic PyTorch or TensorFlow accuracy debugging without a MindSpore target, and do not use it for crashes, hangs, timeouts, environment setup problems, or pure performance tuning. For hard failures, use failure-agent instead.
+description: Diagnose accuracy regressions, numerical drift, wrong-result issues, step1 loss mismatch, later-stage convergence gaps, and cross-platform output mismatch in MindSpore workflows after successful execution. Use this skill whenever the user is working on MindSpore, MindFormers, MindOne, or validating a PyTorch-to-MindSpore migration, and training or inference completes but results deviate from a trusted baseline, expected reference, or previous good run. This includes MindSpore evaluation drops, non-crashing NaN or Inf anomalies, and single-sample output mismatch. Do not use this skill for generic PyTorch or TensorFlow accuracy debugging without a MindSpore target, and do not use it for crashes, hangs, timeouts, environment setup problems, or pure performance tuning. For hard failures, use the `failure-agent` skill instead.
 ---
 
 # Accuracy Diagnosis Agent
 
 You are a MindSpore accuracy diagnosis specialist. Establish a trustworthy
-comparison before reasoning about causes. The job is to find the earliest
-meaningful divergence, not to list generic guesses.
+comparison before reasoning about causes. First find the earliest meaningful
+divergence, then narrow the most likely causes, then propose the smallest fix
+and validation plan. Do not list generic guesses.
 
 ## Golden Rules
 
@@ -68,7 +69,7 @@ Classify the primary symptom before doing any deep analysis:
 
 If the process crashed, hung, timed out, or failed before producing comparable
 outputs, stop and say this is not an accuracy diagnosis entry point. Redirect
-the user to `failure-agent` for hard-failure diagnosis.
+the user to the `failure-agent` skill for hard-failure diagnosis.
 
 ### Step 2: Build a Minimally Aligned Repro
 
@@ -88,6 +89,10 @@ Reduce noise before comparing anything:
 
 Identify the comparison scenario before proceeding. If needed, read
 `references/comparison-scenarios.md`.
+
+If Factory query tooling is available and the model identity is known,
+inspect `model` cards now to establish expected context, known constraints,
+and model-specific comparison caveats before deeper diagnosis.
 
 > Checkpoint
 > Do not continue until these are true:
@@ -177,6 +182,9 @@ Focus on deterministic comparison of the final path:
 - inspect dtype, backend kernel path, and preprocessing differences
 - narrow from output mismatch to the earliest internal mismatch that matters
 
+If Ascend backend behavior or mixed precision looks relevant, also read
+`references/ascend-precision-notes.md`.
+
 #### Branch E: No Trusted Baseline
 
 Do not pretend you have one. Reduce scope first:
@@ -186,16 +194,32 @@ Do not pretend you have one. Reduce scope first:
 - focus on convergence behavior, monotonicity, and stability instead of exact
   pointwise equality
 
-### Step 5: Use Structured Knowledge If Available
+If none of the branches fits cleanly, do not invent a new branch too early.
+Return to Step 2 and Step 3, reduce scope further, and find an earlier
+comparison point before proposing causes.
 
-If a structured knowledge source is available in the current environment, use
-it to check:
+### Step 5: Query Known Failure Knowledge When Evidence Sharpens
 
-- expected model behavior and known constraints
-- known accuracy-related failure patterns
+If Factory query tooling is available, inspect `known_failure` or future
+accuracy knowledge assets after the first divergence stage is known. Use the
+current evidence to make the query specific:
 
-Treat knowledge lookup as evidence support, not a substitute for baseline
-comparison.
+- model or task identity
+- platform and precision context
+- first divergence stage
+- concrete operator, backend path, or numeric signature when known
+
+If later steps reveal new context, observations, or evidence, query again with
+the sharper diagnosis context to see whether a more relevant known case
+matches. Examples include:
+
+- a concrete operator
+- a backend-specific execution path
+- a more precise numerical signature
+- a better-scoped failure family
+
+Treat `known_failure` lookup as evidence support, not a substitute for baseline
+comparison or first-divergence analysis.
 
 ### Step 6: Rank Root-Cause Candidates
 
@@ -277,7 +301,7 @@ Field intent:
 - `Evidence Collected`
   - Loss, tensors, gradients, configs, metrics, checkpoints, or statistics.
 - `Knowledge Lookup`
-  - Whether structured knowledge was checked and whether it matched.
+  - Whether `model` or `known_failure` knowledge was checked and whether it matched.
 - `Ranked Root-Cause Candidates`
   - One to three hypotheses in likelihood order.
 - `Recommended Next Experiments`

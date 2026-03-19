@@ -3,6 +3,10 @@
 Use this file only when the comparison setup itself is unclear. The point is to
 choose the right starting move before running detailed diagnostics.
 
+These are common comparison scenarios, not an exhaustive taxonomy. If a case
+does not fit cleanly, reduce it to the closest comparable setup and continue
+from alignment and first-divergence analysis.
+
 ## Scenario 1: MindSpore vs MindSpore
 
 Typical case:
