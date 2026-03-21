@@ -57,17 +57,17 @@ class TinyCausalLM(nn.Cell):
         self.cross_entropy_reduction = cfg["cross_entropy_reduction"]
         self.alignment_mode = alignment_mode
 
-        self.token_embedding = mint_nn.Embedding(v, h)
-        self.position_embedding = Parameter(Tensor(weights["position_embedding"], ms.float32))
-        self.ln1 = mint_nn.LayerNorm(h, eps=cfg["layer_norm_eps"])
-        self.q_proj = mint_nn.Linear(h, h)
-        self.k_proj = mint_nn.Linear(h, h)
-        self.v_proj = mint_nn.Linear(h, h)
-        self.o_proj = mint_nn.Linear(h, h)
-        self.ln2 = mint_nn.LayerNorm(h, eps=cfg["layer_norm_eps"])
-        self.fc1 = mint_nn.Linear(h, f)
-        self.fc2 = mint_nn.Linear(f, h)
-        self.lm_head = mint_nn.Linear(h, v)
+        self.token_embedding = mint_nn.Embedding(v, h, dtype=compute_dtype)
+        self.position_embedding = Parameter(Tensor(weights["position_embedding"], compute_dtype))
+        self.ln1 = mint_nn.LayerNorm(h, eps=cfg["layer_norm_eps"], dtype=compute_dtype)
+        self.q_proj = mint_nn.Linear(h, h, dtype=compute_dtype)
+        self.k_proj = mint_nn.Linear(h, h, dtype=compute_dtype)
+        self.v_proj = mint_nn.Linear(h, h, dtype=compute_dtype)
+        self.o_proj = mint_nn.Linear(h, h, dtype=compute_dtype)
+        self.ln2 = mint_nn.LayerNorm(h, eps=cfg["layer_norm_eps"], dtype=compute_dtype)
+        self.fc1 = mint_nn.Linear(h, f, dtype=compute_dtype)
+        self.fc2 = mint_nn.Linear(f, h, dtype=compute_dtype)
+        self.lm_head = mint_nn.Linear(h, v, dtype=compute_dtype)
 
         self.load_shared_weights(weights)
 

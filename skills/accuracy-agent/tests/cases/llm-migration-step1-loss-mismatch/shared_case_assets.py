@@ -19,7 +19,7 @@ CASE_CONFIG = {
     "learning_rate": 5e-4,
     "weight_scale": 0.02,
     "steps": 12,
-    "compute_dtype": "float16",
+    "compute_dtype": "bfloat16",
     "label_shift": 1,
     "layer_norm_eps": 1e-5,
     "adam_beta1": 0.9,

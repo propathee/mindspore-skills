@@ -55,7 +55,7 @@ class TinyCausalLM(nn.Module):
         self.alignment_mode = alignment_mode
 
         self.token_embedding = nn.Embedding(v, h)
-        self.position_embedding = nn.Parameter(torch.zeros(s, h, dtype=torch.float32))
+        self.position_embedding = nn.Parameter(torch.zeros(s, h, dtype=compute_dtype))
         self.ln1 = nn.LayerNorm(h, eps=cfg["layer_norm_eps"])
         self.q_proj = nn.Linear(h, h)
         self.k_proj = nn.Linear(h, h)
