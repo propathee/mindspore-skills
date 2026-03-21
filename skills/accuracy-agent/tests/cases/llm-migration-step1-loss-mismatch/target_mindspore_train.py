@@ -18,6 +18,7 @@ from shared_case_assets import (
     get_case_config,
     set_global_seed,
     softmax_entropy,
+    summarize_named_array,
     summarize_arrays,
 )
 
@@ -41,7 +42,7 @@ def to_ms_dtype(name: str):
 
 
 class TinyCausalLM(mint_nn.Module):
-    def __init__(self, cfg, weights, compute_dtype):
+    def __init__(self, cfg, weights, compute_dtype, alignment_mode=False):
         super().__init__()
         h = cfg["hidden_size"]
         f = cfg["ffn_size"]
@@ -52,6 +53,7 @@ class TinyCausalLM(mint_nn.Module):
         self.scale = attention_scale(cfg)
         self.compute_dtype = compute_dtype
         self.cross_entropy_reduction = cfg["cross_entropy_reduction"]
+        self.alignment_mode = alignment_mode
 
         self.token_embedding = mint_nn.Embedding(v, h)
         self.position_embedding = Parameter(Tensor(weights["position_embedding"], ms.float32))
@@ -109,8 +111,11 @@ class TinyCausalLM(mint_nn.Module):
         attn_scores = mint.matmul(q, mint.swapaxes(k, -1, -2)) * self.scale
         attn_scores = attn_scores + causal_mask.astype(attn_scores.dtype)
 
-        # Keep softmax in compute dtype for the current implementation.
-        attn_probs = mint.softmax(attn_scores, dim=-1)
+        if self.alignment_mode:
+            attn_probs = mint.softmax(attn_scores.astype(ms.float32), dim=-1).astype(q.dtype)
+        else:
+            # Keep softmax in compute dtype for the current implementation.
+            attn_probs = mint.softmax(attn_scores, dim=-1)
 
         attn_ctx = mint.matmul(attn_probs, v)
         attn_ctx = mint.reshape(mint.permute(attn_ctx, (0, 2, 1, 3)), (batch_size, seq_len, -1))
@@ -137,7 +142,20 @@ class TinyCausalLM(mint_nn.Module):
             "logits_mean": float(logits.astype(ms.float32).mean().asnumpy()),
             "logits_std": float(logits.astype(ms.float32).std().asnumpy()),
         }
-        return loss, debug
+        alignment_snapshot = None
+        if self.alignment_mode:
+            alignment_snapshot = [
+                summarize_tensor("input_embeddings", self.token_embedding(input_ids)),
+                summarize_tensor("ln1_output", h),
+                summarize_tensor("q_proj_output", q),
+                summarize_tensor("k_proj_output", k),
+                summarize_tensor("v_proj_output", v),
+                summarize_tensor("attn_scores", attn_scores),
+                summarize_tensor("attn_probs", attn_probs),
+                summarize_tensor("attn_context", attn_ctx),
+                summarize_tensor("logits", logits),
+            ]
+        return loss, debug, alignment_snapshot
 
 
 def model_summary(model):
@@ -158,17 +176,30 @@ def exact_gelu(x):
     return 0.5 * x * (1.0 + mint.erf(x * inv_sqrt2))
 
 
+def summarize_tensor(name, tensor):
+    return summarize_named_array(
+        name,
+        tensor.astype(ms.float32).asnumpy(),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="runs/target")
     parser.add_argument("--steps", type=int, default=None)
+    parser.add_argument("--alignment-mode", action="store_true")
     args = parser.parse_args()
 
     cfg = get_case_config()
     if args.steps is not None:
         cfg["steps"] = args.steps
+    if args.alignment_mode:
+        cfg["compute_dtype"] = "float32"
+        if args.steps is None:
+            cfg["steps"] = 1
 
     set_global_seed(int(cfg["seed"]))
+    ms.set_seed(int(cfg["seed"]))
     device_target = resolve_device_target()
     compute_dtype = to_ms_dtype(cfg["compute_dtype"])
     logger = JsonlLogger(args.output_dir, "target_mindspore_train.py")
@@ -180,6 +211,7 @@ def main():
         device_target=device_target,
         mindspore_version=ms.__version__,
         mode="PYNATIVE_MODE",
+        alignment_mode=bool(args.alignment_mode),
     )
 
     weights = build_shared_weights(cfg)
@@ -193,7 +225,7 @@ def main():
         first_row=batch["input_ids"][0, :8].tolist(),
     )
 
-    model = TinyCausalLM(cfg, weights, compute_dtype)
+    model = TinyCausalLM(cfg, weights, compute_dtype, alignment_mode=args.alignment_mode)
     optimizer = mint.optim.AdamW(
         model.trainable_params(),
         learning_rate=cfg["learning_rate"],
@@ -216,19 +248,42 @@ def main():
 
     losses = []
     for step in range(1, int(cfg["steps"]) + 1):
-        (loss, debug), grads = grad_fn(input_ids, labels)
-        optimizer(grads)
-        grad_norm_sq = 0.0
-        for grad in grads:
-            grad_norm_sq += float((grad.astype(ms.float32) ** 2).sum().asnumpy())
-        grad_norm = grad_norm_sq ** 0.5
+        grad_norm = None
+        update_applied = False
+        if args.alignment_mode:
+            loss, debug, alignment_snapshot = forward_fn(input_ids, labels)
+        else:
+            (loss, debug, alignment_snapshot), grads = grad_fn(input_ids, labels)
+            optimizer(grads)
+            grad_norm_sq = 0.0
+            for grad in grads:
+                grad_norm_sq += float((grad.astype(ms.float32) ** 2).sum().asnumpy())
+            grad_norm = grad_norm_sq ** 0.5
+            update_applied = True
         loss_value = float(loss.asnumpy())
         losses.append(loss_value)
+        if args.alignment_mode and alignment_snapshot is not None:
+            alignment_record = {
+                "framework": "mindspore",
+                "alignment_mode": True,
+                "step": step,
+                "compute_dtype": cfg["compute_dtype"],
+                "softmax_path": "fp32_then_cast_back",
+                "tensors": alignment_snapshot,
+            }
+            with open(
+                os.path.join(args.output_dir, "alignment_snapshot.json"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump(alignment_record, f, indent=2)
+            logger.log("alignment_snapshot", step=step, tensors=alignment_snapshot)
         logger.log(
             "train_step",
             step=step,
             loss=loss_value,
             grad_norm=grad_norm,
+            update_applied=update_applied,
             debug=debug,
         )
 
@@ -238,6 +293,7 @@ def main():
         "losses": losses,
         "step1_loss": losses[0],
         "final_loss": losses[-1],
+        "alignment_mode": bool(args.alignment_mode),
     }
     with open(os.path.join(args.output_dir, "run_summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)

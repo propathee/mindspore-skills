@@ -132,6 +132,24 @@ def summarize_arrays(arrays: Dict[str, np.ndarray]) -> List[Dict[str, object]]:
     return summary
 
 
+def summarize_named_array(
+    name: str,
+    array: np.ndarray,
+    preview_items: int = 8,
+) -> Dict[str, object]:
+    flat = array.reshape(-1)
+    return {
+        "name": name,
+        "shape": list(array.shape),
+        "dtype": str(array.dtype),
+        "mean": float(array.mean()),
+        "std": float(array.std()),
+        "min": float(array.min()),
+        "max": float(array.max()),
+        "preview": flat[:preview_items].tolist(),
+    }
+
+
 def softmax_entropy(probs: np.ndarray, eps: float = 1e-9) -> float:
     probs = np.clip(probs, eps, 1.0)
     entropy = -(probs * np.log(probs)).sum(axis=-1)

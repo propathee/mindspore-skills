@@ -22,6 +22,7 @@ from shared_case_assets import (
     get_case_config,
     set_global_seed,
     softmax_entropy,
+    summarize_named_array,
     summarize_arrays,
 )
 
@@ -41,7 +42,7 @@ def to_torch_dtype(name: str) -> torch.dtype:
 
 
 class TinyCausalLM(nn.Module):
-    def __init__(self, cfg, weights, compute_dtype):
+    def __init__(self, cfg, weights, compute_dtype, alignment_mode=False):
         super().__init__()
         h = cfg["hidden_size"]
         f = cfg["ffn_size"]
@@ -52,6 +53,7 @@ class TinyCausalLM(nn.Module):
         self.scale = attention_scale(cfg)
         self.compute_dtype = compute_dtype
         self.cross_entropy_reduction = cfg["cross_entropy_reduction"]
+        self.alignment_mode = alignment_mode
 
         self.token_embedding = nn.Embedding(v, h)
         self.position_embedding = nn.Parameter(torch.zeros(s, h, dtype=torch.float32))
@@ -135,7 +137,20 @@ class TinyCausalLM(nn.Module):
             "logits_mean": float(logits.float().mean().item()),
             "logits_std": float(logits.float().std().item()),
         }
-        return loss, debug
+        alignment_snapshot = None
+        if self.alignment_mode:
+            alignment_snapshot = [
+                summarize_tensor("input_embeddings", self.token_embedding(input_ids)),
+                summarize_tensor("ln1_output", h),
+                summarize_tensor("q_proj_output", q),
+                summarize_tensor("k_proj_output", k),
+                summarize_tensor("v_proj_output", v),
+                summarize_tensor("attn_scores", attn_scores),
+                summarize_tensor("attn_probs", attn_probs),
+                summarize_tensor("attn_context", attn_ctx),
+                summarize_tensor("logits", logits),
+            ]
+        return loss, debug, alignment_snapshot
 
 
 def named_parameter_summary(model):
@@ -157,17 +172,32 @@ def exact_gelu(x):
     return 0.5 * x * (1.0 + torch.erf(x * inv_sqrt2))
 
 
+def summarize_tensor(name, tensor):
+    return summarize_named_array(
+        name,
+        tensor.detach().float().cpu().numpy(),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="runs/baseline")
     parser.add_argument("--steps", type=int, default=None)
+    parser.add_argument("--alignment-mode", action="store_true")
     args = parser.parse_args()
 
     cfg = get_case_config()
     if args.steps is not None:
         cfg["steps"] = args.steps
+    if args.alignment_mode:
+        cfg["compute_dtype"] = "float32"
+        if args.steps is None:
+            cfg["steps"] = 1
 
     set_global_seed(int(cfg["seed"]))
+    torch.manual_seed(int(cfg["seed"]))
+    if hasattr(torch, "npu") and hasattr(torch.npu, "manual_seed_all"):
+        torch.npu.manual_seed_all(int(cfg["seed"]))
     device = resolve_device()
     compute_dtype = to_torch_dtype(cfg["compute_dtype"])
     logger = JsonlLogger(args.output_dir, "baseline_torch_npu_train.py")
@@ -179,6 +209,7 @@ def main():
         device=str(device),
         torch_version=torch.__version__,
         torch_npu_available=HAS_TORCH_NPU,
+        alignment_mode=bool(args.alignment_mode),
     )
 
     weights = build_shared_weights(cfg)
@@ -192,7 +223,7 @@ def main():
         first_row=batch["input_ids"][0, :8].tolist(),
     )
 
-    model = TinyCausalLM(cfg, weights, compute_dtype).to(device)
+    model = TinyCausalLM(cfg, weights, compute_dtype, alignment_mode=args.alignment_mode).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg["learning_rate"],
@@ -212,20 +243,41 @@ def main():
     for step in range(1, int(cfg["steps"]) + 1):
         model.train()
         optimizer.zero_grad(set_to_none=True)
-        loss, debug = model(input_ids, labels, causal_mask)
-        loss.backward()
-        grad_norm = 0.0
-        for param in model.parameters():
-            if param.grad is not None:
-                grad_norm += float(param.grad.float().norm().item()) ** 2
-        grad_norm = grad_norm ** 0.5
-        optimizer.step()
+        loss, debug, alignment_snapshot = model(input_ids, labels, causal_mask)
+        grad_norm = None
+        update_applied = False
+        if not args.alignment_mode:
+            loss.backward()
+            grad_norm = 0.0
+            for param in model.parameters():
+                if param.grad is not None:
+                    grad_norm += float(param.grad.float().norm().item()) ** 2
+            grad_norm = grad_norm ** 0.5
+            optimizer.step()
+            update_applied = True
         losses.append(float(loss.item()))
+        if args.alignment_mode and alignment_snapshot is not None:
+            alignment_record = {
+                "framework": "pytorch",
+                "alignment_mode": True,
+                "step": step,
+                "compute_dtype": cfg["compute_dtype"],
+                "softmax_path": "fp32_then_cast_back",
+                "tensors": alignment_snapshot,
+            }
+            with open(
+                os.path.join(args.output_dir, "alignment_snapshot.json"),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                json.dump(alignment_record, f, indent=2)
+            logger.log("alignment_snapshot", step=step, tensors=alignment_snapshot)
         logger.log(
             "train_step",
             step=step,
             loss=float(loss.item()),
             grad_norm=grad_norm,
+            update_applied=update_applied,
             debug=debug,
         )
 
@@ -235,6 +287,7 @@ def main():
         "losses": losses,
         "step1_loss": losses[0],
         "final_loss": losses[-1],
+        "alignment_mode": bool(args.alignment_mode),
     }
     with open(os.path.join(args.output_dir, "run_summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
