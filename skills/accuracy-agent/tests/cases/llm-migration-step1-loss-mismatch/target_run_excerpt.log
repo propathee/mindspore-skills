@@ -1,0 +1,9 @@
+{"event":"config","script":"target_mindspore_train.py","config":{"seed":20260320,"vocab_size":2048,"seq_len":64,"batch_size":4,"hidden_size":128,"num_heads":4,"ffn_size":256,"learning_rate":0.0005,"weight_scale":0.02,"steps":12,"compute_dtype":"float16","label_shift":1}}
+{"event":"environment","script":"target_mindspore_train.py","framework":"mindspore","device_target":"Ascend","mindspore_version":"2.x","mode":"PYNATIVE_MODE"}
+{"event":"phase","script":"target_mindspore_train.py","name":"train_start"}
+{"event":"train_step","script":"target_mindspore_train.py","step":1,"loss":7.3561,"grad_norm":2.6208,"debug":{"attn_scores_mean":-157.0668,"attn_scores_std":2717.7014,"attn_probs_entropy":3.8611,"logits_mean":0.0033,"logits_std":0.3371}}
+{"event":"train_step","script":"target_mindspore_train.py","step":2,"loss":7.2297,"grad_norm":2.5149,"debug":{"attn_scores_mean":-156.4980,"attn_scores_std":2711.2261,"attn_probs_entropy":3.8720,"logits_mean":0.0040,"logits_std":0.3517}}
+{"event":"train_step","script":"target_mindspore_train.py","step":4,"loss":7.0452,"grad_norm":2.3660,"debug":{"attn_scores_mean":-155.7197,"attn_scores_std":2702.8306,"attn_probs_entropy":3.8875,"logits_mean":0.0055,"logits_std":0.3792}}
+{"event":"train_step","script":"target_mindspore_train.py","step":8,"loss":6.7968,"grad_norm":2.1627,"debug":{"attn_scores_mean":-154.9398,"attn_scores_std":2691.7446,"attn_probs_entropy":3.9131,"logits_mean":0.0096,"logits_std":0.4250}}
+{"event":"train_step","script":"target_mindspore_train.py","step":12,"loss":6.6029,"grad_norm":2.0174,"debug":{"attn_scores_mean":-154.2780,"attn_scores_std":2680.6519,"attn_probs_entropy":3.9366,"logits_mean":0.0140,"logits_std":0.4688}}
+{"event":"phase","script":"target_mindspore_train.py","name":"train_end","summary":{"framework":"mindspore","device_target":"Ascend","step1_loss":7.3561,"final_loss":6.6029}}

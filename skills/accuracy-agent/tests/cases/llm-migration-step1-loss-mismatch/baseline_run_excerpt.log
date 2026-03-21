@@ -1,0 +1,9 @@
+{"event":"config","script":"baseline_torch_npu_train.py","config":{"seed":20260320,"vocab_size":2048,"seq_len":64,"batch_size":4,"hidden_size":128,"num_heads":4,"ffn_size":256,"learning_rate":0.0005,"weight_scale":0.02,"steps":12,"compute_dtype":"float16","label_shift":1}}
+{"event":"environment","script":"baseline_torch_npu_train.py","framework":"pytorch","device":"npu:0","torch_version":"2.1.x","torch_npu_available":true}
+{"event":"phase","script":"baseline_torch_npu_train.py","name":"train_start"}
+{"event":"train_step","script":"baseline_torch_npu_train.py","step":1,"loss":7.2143,"grad_norm":2.4812,"debug":{"attn_scores_mean":-157.0840,"attn_scores_std":2717.5122,"attn_probs_entropy":4.0328,"logits_mean":0.0034,"logits_std":0.3238}}
+{"event":"train_step","script":"baseline_torch_npu_train.py","step":2,"loss":7.0518,"grad_norm":2.3139,"debug":{"attn_scores_mean":-156.5125,"attn_scores_std":2710.9424,"attn_probs_entropy":4.0407,"logits_mean":0.0041,"logits_std":0.3365}}
+{"event":"train_step","script":"baseline_torch_npu_train.py","step":4,"loss":6.7815,"grad_norm":2.0610,"debug":{"attn_scores_mean":-155.7134,"attn_scores_std":2701.4453,"attn_probs_entropy":4.0589,"logits_mean":0.0060,"logits_std":0.3618}}
+{"event":"train_step","script":"baseline_torch_npu_train.py","step":8,"loss":6.4026,"grad_norm":1.7734,"debug":{"attn_scores_mean":-154.8881,"attn_scores_std":2690.2268,"attn_probs_entropy":4.0806,"logits_mean":0.0107,"logits_std":0.4029}}
+{"event":"train_step","script":"baseline_torch_npu_train.py","step":12,"loss":6.0837,"grad_norm":1.5908,"debug":{"attn_scores_mean":-154.1633,"attn_scores_std":2678.6648,"attn_probs_entropy":4.1015,"logits_mean":0.0151,"logits_std":0.4381}}
+{"event":"phase","script":"baseline_torch_npu_train.py","name":"train_end","summary":{"framework":"pytorch","device":"npu:0","step1_loss":7.2143,"final_loss":6.0837}}

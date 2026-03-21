@@ -1,0 +1,19 @@
+{
+  "eval_id": 1,
+  "eval_name": "llm-migration-step1-loss-mismatch",
+  "prompt": "I attached a small single-card Ascend migration case for a tiny decoder-only language model. `baseline_torch_npu_train.py` is the known-good PyTorch + torch_npu training script. `target_mindspore_train.py` is the MindSpore port. They both load identical synthetic weights and a fixed batch from `shared_case_assets.py`. Training succeeds on both sides, but the target already shows a different step1 loss and later short-run degradation on Ascend. I also attached representative run excerpts. Please diagnose this with the accuracy-agent workflow and recommend the smallest useful experiments first.",
+  "assertions": [
+    "The answer classifies the case as a MindSpore accuracy diagnosis case, not a hard failure or pure performance issue.",
+    "The answer recognizes that step1 loss already differs and treats that as the first divergence signal.",
+    "The answer frames the diagnosis as forward-path or Branch A style analysis before optimizer-focused analysis.",
+    "The answer checks or explicitly asks the reader to confirm alignment of weights, batch, seed, dropout, and precision context.",
+    "The answer identifies PyTorch plus torch_npu on Ascend to MindSpore on Ascend as the comparison scenario.",
+    "The answer suspects dtype, AMP, cast path, or backend precision behavior as a likely cause family.",
+    "The answer highlights the attention path, especially attention scores, softmax, attention probabilities, or nearby tensors, as a likely hotspot.",
+    "The answer mentions Ascend-specific precision behavior or backend path differences as relevant context.",
+    "The answer proposes small, staged experiments such as intermediate tensor comparison, golden batch comparison, or temporarily upcasting a target path.",
+    "The answer proposes a minimal validating fix consistent with aligning the attention softmax or score precision path with the baseline behavior.",
+    "The answer includes validation criteria such as step1 loss alignment followed by a short-run comparison.",
+    "The answer avoids defaulting to generic learning-rate tuning, distributed debugging, or hard-failure routing."
+  ]
+}

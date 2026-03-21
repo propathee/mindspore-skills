@@ -3,21 +3,30 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "My MindSpore training finishes, but the top-1 accuracy dropped after I migrated from PyTorch. Step1 loss is already different from the PyTorch baseline on the same weights and the same batch. How should I debug this?",
-      "expected_output": "Recognizes a step1 loss mismatch, aligns the comparison setup first, treats the problem as a forward-path issue, and recommends a staged tensor comparison instead of generic tuning.",
-      "files": []
-    },
-    {
-      "id": 2,
-      "prompt": "Step1 loss matches our previous good MindSpore run, but after about 80 steps the local norm and loss curve drift and the final evaluation is worse. I need a practical diagnosis plan.",
-      "expected_output": "Routes to the later-divergence branch, focuses on gradients, one-step updates, optimizer settings, and distributed differences, and uses a validation ladder.",
-      "files": []
-    },
-    {
-      "id": 3,
-      "prompt": "Training stops at step 2 with a RuntimeError and then I see NaN in the log. Can the accuracy-agent help me diagnose it?",
-      "expected_output": "Rejects the case as a pure accuracy entry point because execution failed, asks for failure evidence or redirects to failure diagnosis instead of using the NaN branch.",
-      "files": []
+      "prompt": "I attached a small single-card Ascend migration case for a tiny decoder-only language model. `baseline_torch_npu_train.py` is the known-good PyTorch + torch_npu training script. `target_mindspore_train.py` is the MindSpore port. They both load identical synthetic weights and a fixed batch from `shared_case_assets.py`. Training succeeds on both sides, but the target already shows a different step1 loss and later short-run degradation on Ascend. I also attached representative run excerpts. Please diagnose this with the accuracy-agent workflow and recommend the smallest useful experiments first.",
+      "expected_output": "Recognizes a MindSpore migration accuracy case, confirms step1 loss mismatch as the first divergence, treats it as a forward-path issue, inspects code and evidence before guessing, suspects attention-path dtype or cast differences, and proposes a small validating fix plus a staged validation plan.",
+      "files": [
+        "tests/cases/llm-migration-step1-loss-mismatch/README.md",
+        "tests/cases/llm-migration-step1-loss-mismatch/shared_case_assets.py",
+        "tests/cases/llm-migration-step1-loss-mismatch/baseline_torch_npu_train.py",
+        "tests/cases/llm-migration-step1-loss-mismatch/target_mindspore_train.py",
+        "tests/cases/llm-migration-step1-loss-mismatch/baseline_run.log",
+        "tests/cases/llm-migration-step1-loss-mismatch/baseline_run.log"
+      ],
+      "expectations": [
+        "The answer classifies the case as a MindSpore accuracy diagnosis case, not a hard failure or pure performance issue.",
+        "The answer recognizes that step1 loss already differs and treats that as the first divergence signal.",
+        "The answer frames the diagnosis as forward-path or Branch A style analysis before optimizer-focused analysis.",
+        "The answer checks or explicitly asks the reader to confirm alignment of weights, batch, seed, dropout, and precision context.",
+        "The answer identifies PyTorch plus torch_npu on Ascend to MindSpore on Ascend as the comparison scenario.",
+        "The answer suspects dtype, AMP, cast path, or backend precision behavior as a likely cause family.",
+        "The answer highlights the attention path, especially attention scores, softmax, attention probabilities, or nearby tensors, as a likely hotspot.",
+        "The answer mentions Ascend-specific precision behavior or backend path differences as relevant context.",
+        "The answer proposes small, staged experiments such as intermediate tensor comparison, golden batch comparison, or temporarily upcasting a target path.",
+        "The answer proposes a minimal validating fix consistent with aligning the attention softmax or score precision path with the baseline behavior.",
+        "The answer includes validation criteria such as step1 loss alignment followed by a short-run comparison.",
+        "The answer avoids defaulting to generic learning-rate tuning, distributed debugging, or hard-failure routing."
+      ]
     }
   ]
 }
