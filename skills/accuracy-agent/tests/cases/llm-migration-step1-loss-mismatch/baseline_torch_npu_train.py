@@ -316,7 +316,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="runs/baseline")
     parser.add_argument("--steps", type=int, default=None)
-    parser.add_argument("--model-preset", choices=sorted(MODEL_PRESETS), default="default")
+    parser.add_argument("--model-preset", choices=sorted(MODEL_PRESETS), default="large")
     parser.add_argument("--compute-dtype", choices=["float16", "bfloat16", "float32"], default=None)
     parser.add_argument("--learning-rate", type=float, default=None)
     parser.add_argument("--weight-decay", type=float, default=None)

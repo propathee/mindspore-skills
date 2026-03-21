@@ -74,4 +74,75 @@ python target_mindspore_train.py \
   --optimizer-impl nn \
   --output-dir runs/35_target_bf16_optimizer_impl
 
+echo "[36] bf16 GELU implementation difference"
+python baseline_torch_npu_train.py \
+  --compute-dtype bfloat16 \
+  --output-dir runs/36_baseline_bf16_gelu_impl
+
+python target_mindspore_train.py \
+  --compute-dtype bfloat16 \
+  --gelu-impl nn \
+  --optimizer-impl mint \
+  --output-dir runs/36_target_bf16_gelu_impl
+
+echo "[37] bf16 Linear implementation difference"
+python baseline_torch_npu_train.py \
+  --compute-dtype bfloat16 \
+  --output-dir runs/37_baseline_bf16_linear_impl
+
+python target_mindspore_train.py \
+  --compute-dtype bfloat16 \
+  --linear-impl nn \
+  --optimizer-impl mint \
+  --output-dir runs/37_target_bf16_linear_impl
+
+echo "[38] bf16 Embedding implementation difference"
+python baseline_torch_npu_train.py \
+  --compute-dtype bfloat16 \
+  --output-dir runs/38_baseline_bf16_embedding_impl
+
+python target_mindspore_train.py \
+  --compute-dtype bfloat16 \
+  --embedding-impl nn \
+  --optimizer-impl mint \
+  --output-dir runs/38_target_bf16_embedding_impl
+
+echo "[39] bf16 MatMul implementation difference"
+python baseline_torch_npu_train.py \
+  --compute-dtype bfloat16 \
+  --output-dir runs/39_baseline_bf16_matmul_impl
+
+python target_mindspore_train.py \
+  --compute-dtype bfloat16 \
+  --matmul-impl ops \
+  --optimizer-impl mint \
+  --output-dir runs/39_target_bf16_matmul_impl
+
+echo "[40] bf16 Softmax implementation difference"
+python baseline_torch_npu_train.py \
+  --compute-dtype bfloat16 \
+  --output-dir runs/40_baseline_bf16_softmax_impl
+
+python target_mindspore_train.py \
+  --compute-dtype bfloat16 \
+  --softmax-impl ops \
+  --optimizer-impl mint \
+  --output-dir runs/40_target_bf16_softmax_impl
+
+echo "[41] bf16 alternate nn/ops implementation bundle"
+python baseline_torch_npu_train.py \
+  --compute-dtype bfloat16 \
+  --output-dir runs/41_baseline_bf16_impl_bundle
+
+python target_mindspore_train.py \
+  --compute-dtype bfloat16 \
+  --embedding-impl nn \
+  --linear-impl nn \
+  --layernorm-impl nn \
+  --gelu-impl nn \
+  --matmul-impl ops \
+  --softmax-impl ops \
+  --optimizer-impl mint \
+  --output-dir runs/41_target_bf16_impl_bundle
+
 echo "Scenario runs complete."
