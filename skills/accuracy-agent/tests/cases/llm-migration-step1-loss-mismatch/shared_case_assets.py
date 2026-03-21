@@ -15,6 +15,7 @@ CASE_CONFIG = {
     "batch_size": 4,
     "hidden_size": 128,
     "num_heads": 4,
+    "num_layers": 1,
     "ffn_size": 256,
     "learning_rate": 5e-4,
     "weight_scale": 0.02,
@@ -27,6 +28,19 @@ CASE_CONFIG = {
     "adam_eps": 1e-8,
     "weight_decay": 0.01,
     "cross_entropy_reduction": "mean",
+}
+
+
+MODEL_PRESETS = {
+    "default": {},
+    "large": {
+        "seq_len": 1024,
+        "batch_size": 2,
+        "hidden_size": 512,
+        "num_heads": 8,
+        "num_layers": 2,
+        "ffn_size": 2048,
+    },
 }
 
 
@@ -117,6 +131,13 @@ def get_case_config() -> Dict[str, object]:
     return dict(CASE_CONFIG)
 
 
+def apply_model_preset(cfg: Dict[str, object], preset: str) -> Dict[str, object]:
+    if preset not in MODEL_PRESETS:
+        raise KeyError(f"Unknown model preset: {preset}")
+    cfg.update(MODEL_PRESETS[preset])
+    return cfg
+
+
 def build_fixed_batch(cfg: Dict[str, object]) -> Dict[str, np.ndarray]:
     rng = np.random.default_rng(int(cfg["seed"]) + 11)
     input_ids = rng.integers(
@@ -151,28 +172,37 @@ def build_shared_weights(cfg: Dict[str, object]) -> Dict[str, np.ndarray]:
     def zeros(shape):
         return np.zeros(shape, dtype=np.float32)
 
-    return {
+    weights = {
         "token_embedding": normal((v, h)),
         "position_embedding": normal((s, h)),
-        "ln1_weight": np.ones((h,), dtype=np.float32),
-        "ln1_bias": zeros((h,)),
-        "q_proj_weight": normal((h, h)),
-        "q_proj_bias": zeros((h,)),
-        "k_proj_weight": normal((h, h)),
-        "k_proj_bias": zeros((h,)),
-        "v_proj_weight": normal((h, h)),
-        "v_proj_bias": zeros((h,)),
-        "o_proj_weight": normal((h, h)),
-        "o_proj_bias": zeros((h,)),
-        "ln2_weight": np.ones((h,), dtype=np.float32),
-        "ln2_bias": zeros((h,)),
-        "fc1_weight": normal((f, h)),
-        "fc1_bias": zeros((f,)),
-        "fc2_weight": normal((h, f)),
-        "fc2_bias": zeros((h,)),
         "lm_head_weight": normal((v, h)),
         "lm_head_bias": zeros((v,)),
     }
+
+    for layer_idx in range(int(cfg["num_layers"])):
+        prefix = f"layer{layer_idx}"
+        weights.update(
+            {
+                f"{prefix}_ln1_weight": np.ones((h,), dtype=np.float32),
+                f"{prefix}_ln1_bias": zeros((h,)),
+                f"{prefix}_q_proj_weight": normal((h, h)),
+                f"{prefix}_q_proj_bias": zeros((h,)),
+                f"{prefix}_k_proj_weight": normal((h, h)),
+                f"{prefix}_k_proj_bias": zeros((h,)),
+                f"{prefix}_v_proj_weight": normal((h, h)),
+                f"{prefix}_v_proj_bias": zeros((h,)),
+                f"{prefix}_o_proj_weight": normal((h, h)),
+                f"{prefix}_o_proj_bias": zeros((h,)),
+                f"{prefix}_ln2_weight": np.ones((h,), dtype=np.float32),
+                f"{prefix}_ln2_bias": zeros((h,)),
+                f"{prefix}_fc1_weight": normal((f, h)),
+                f"{prefix}_fc1_bias": zeros((f,)),
+                f"{prefix}_fc2_weight": normal((h, f)),
+                f"{prefix}_fc2_bias": zeros((h,)),
+            }
+        )
+
+    return weights
 
 
 def summarize_arrays(arrays: Dict[str, np.ndarray]) -> List[Dict[str, object]]:
