@@ -5,7 +5,7 @@ import os
 
 import mindspore as ms
 import numpy as np
-from mindspore import Parameter, Tensor, nn
+from mindspore import Parameter, Tensor, amp, nn
 import mindspore.mint as mint
 import mindspore.mint.nn as mint_nn
 import mindspore.mint.nn.functional as F
@@ -274,6 +274,7 @@ def main():
     )
 
     model = TinyCausalLM(cfg, weights, compute_dtype, alignment_mode=args.alignment_mode)
+    model = amp.auto_mixed_precision(model, amp_level="O0")
     optimizer = mint.optim.AdamW(
         model.trainable_params(),
         lr=cfg["learning_rate"],
