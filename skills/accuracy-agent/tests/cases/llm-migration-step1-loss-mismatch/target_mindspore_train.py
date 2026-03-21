@@ -188,20 +188,52 @@ def to_numpy(tensor):
     return tensor.astype(ms.float32).asnumpy()
 
 
+def save_parameter_snapshot(model, output_dir):
+    packed = {}
+    index = []
+    for i, (name, param) in enumerate(model.parameters_and_names()):
+        key = f"param_{i:03d}"
+        packed[key] = to_numpy(param)
+        index.append(
+            {
+                "key": key,
+                "name": name,
+                "shape": list(param.shape),
+            }
+        )
+    np.savez_compressed(os.path.join(output_dir, "alignment_parameters.npz"), **packed)
+    with open(
+        os.path.join(output_dir, "alignment_parameters_index.json"),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(index, f, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="runs/target")
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--alignment-mode", action="store_true")
+    parser.add_argument("--alignment-allow-update", action="store_true")
+    parser.add_argument(
+        "--no-alignment-diff-reduction",
+        dest="alignment_diff_reduction",
+        action="store_false",
+        help="Keep deterministic alignment checks, but do not force extra diff-reduction steps such as compute_dtype=float32.",
+    )
+    parser.set_defaults(alignment_diff_reduction=True)
     args = parser.parse_args()
 
     cfg = get_case_config()
     if args.steps is not None:
         cfg["steps"] = args.steps
-    if args.alignment_mode:
+    if args.alignment_mode and args.alignment_diff_reduction:
         cfg["compute_dtype"] = "float32"
         if args.steps is None:
             cfg["steps"] = 1
+    elif args.alignment_mode and args.steps is None:
+        cfg["steps"] = 1
 
     determinism_info = None
     if args.alignment_mode:
@@ -224,6 +256,8 @@ def main():
         mindspore_version=ms.__version__,
         mode="PYNATIVE_MODE",
         alignment_mode=bool(args.alignment_mode),
+        alignment_allow_update=bool(args.alignment_allow_update),
+        alignment_diff_reduction=bool(args.alignment_diff_reduction),
         deterministic_algorithms=bool(args.alignment_mode),
         determinism_info=determinism_info,
     )
@@ -264,7 +298,7 @@ def main():
     for step in range(1, int(cfg["steps"]) + 1):
         grad_norm = None
         update_applied = False
-        if args.alignment_mode:
+        if args.alignment_mode and not args.alignment_allow_update:
             loss, debug, alignment_snapshot, alignment_tensors = forward_fn(input_ids, labels)
         else:
             (loss, debug, alignment_snapshot, alignment_tensors), grads = grad_fn(input_ids, labels)
@@ -283,6 +317,8 @@ def main():
                 "step": step,
                 "compute_dtype": cfg["compute_dtype"],
                 "softmax_path": "fp32_then_cast_back",
+                "alignment_allow_update": bool(args.alignment_allow_update),
+                "alignment_diff_reduction": bool(args.alignment_diff_reduction),
                 "tensors": alignment_snapshot,
             }
             with open(
@@ -305,6 +341,9 @@ def main():
             debug=debug,
         )
 
+    if args.alignment_mode:
+        save_parameter_snapshot(model, args.output_dir)
+
     summary = {
         "framework": "mindspore",
         "device_target": device_target,
@@ -312,6 +351,8 @@ def main():
         "step1_loss": losses[0],
         "final_loss": losses[-1],
         "alignment_mode": bool(args.alignment_mode),
+        "alignment_allow_update": bool(args.alignment_allow_update),
+        "alignment_diff_reduction": bool(args.alignment_diff_reduction),
     }
     with open(os.path.join(args.output_dir, "run_summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)

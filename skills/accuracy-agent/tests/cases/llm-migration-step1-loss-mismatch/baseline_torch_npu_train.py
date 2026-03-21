@@ -181,20 +181,52 @@ def to_numpy(tensor):
     return tensor.detach().float().cpu().numpy()
 
 
+def save_parameter_snapshot(model, output_dir):
+    packed = {}
+    index = []
+    for i, (name, param) in enumerate(model.named_parameters()):
+        key = f"param_{i:03d}"
+        packed[key] = to_numpy(param)
+        index.append(
+            {
+                "key": key,
+                "name": name,
+                "shape": list(param.shape),
+            }
+        )
+    np.savez_compressed(os.path.join(output_dir, "alignment_parameters.npz"), **packed)
+    with open(
+        os.path.join(output_dir, "alignment_parameters_index.json"),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(index, f, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", default="runs/baseline")
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--alignment-mode", action="store_true")
+    parser.add_argument("--alignment-allow-update", action="store_true")
+    parser.add_argument(
+        "--no-alignment-diff-reduction",
+        dest="alignment_diff_reduction",
+        action="store_false",
+        help="Keep deterministic alignment checks, but do not force extra diff-reduction steps such as compute_dtype=float32.",
+    )
+    parser.set_defaults(alignment_diff_reduction=True)
     args = parser.parse_args()
 
     cfg = get_case_config()
     if args.steps is not None:
         cfg["steps"] = args.steps
-    if args.alignment_mode:
+    if args.alignment_mode and args.alignment_diff_reduction:
         cfg["compute_dtype"] = "float32"
         if args.steps is None:
             cfg["steps"] = 1
+    elif args.alignment_mode and args.steps is None:
+        cfg["steps"] = 1
 
     determinism_info = None
     if args.alignment_mode:
@@ -220,6 +252,8 @@ def main():
         torch_version=torch.__version__,
         torch_npu_available=True,
         alignment_mode=bool(args.alignment_mode),
+        alignment_allow_update=bool(args.alignment_allow_update),
+        alignment_diff_reduction=bool(args.alignment_diff_reduction),
         deterministic_algorithms=bool(args.alignment_mode),
         determinism_info=determinism_info,
     )
@@ -258,7 +292,7 @@ def main():
         loss, debug, alignment_snapshot, alignment_tensors = model(input_ids, labels, causal_mask)
         grad_norm = None
         update_applied = False
-        if not args.alignment_mode:
+        if not args.alignment_mode or args.alignment_allow_update:
             loss.backward()
             grad_norm = 0.0
             for param in model.parameters():
@@ -275,6 +309,8 @@ def main():
                 "step": step,
                 "compute_dtype": cfg["compute_dtype"],
                 "softmax_path": "fp32_then_cast_back",
+                "alignment_allow_update": bool(args.alignment_allow_update),
+                "alignment_diff_reduction": bool(args.alignment_diff_reduction),
                 "tensors": alignment_snapshot,
             }
             with open(
@@ -297,6 +333,9 @@ def main():
             debug=debug,
         )
 
+    if args.alignment_mode:
+        save_parameter_snapshot(model, args.output_dir)
+
     summary = {
         "framework": "pytorch",
         "device": str(device),
@@ -304,6 +343,8 @@ def main():
         "step1_loss": losses[0],
         "final_loss": losses[-1],
         "alignment_mode": bool(args.alignment_mode),
+        "alignment_allow_update": bool(args.alignment_allow_update),
+        "alignment_diff_reduction": bool(args.alignment_diff_reduction),
     }
     with open(os.path.join(args.output_dir, "run_summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)

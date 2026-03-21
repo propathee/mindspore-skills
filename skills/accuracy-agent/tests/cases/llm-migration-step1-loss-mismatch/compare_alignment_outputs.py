@@ -20,6 +20,14 @@ DEFAULT_ORDER = [
 ]
 
 
+def resolve_optional_file(path: str, filename: str) -> str | None:
+    if os.path.isdir(path):
+        candidate = os.path.join(path, filename)
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def resolve_npz(path: str) -> str:
     if os.path.isdir(path):
         candidate = os.path.join(path, "alignment_tensors.npz")
@@ -46,6 +54,19 @@ def load_npz(path: str) -> Dict[str, np.ndarray]:
 def load_json(path: str) -> Dict[str, object]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_parameter_bundle(path: str) -> Tuple[Dict[str, np.ndarray], Dict[str, str]] | Tuple[None, None]:
+    npz_path = resolve_optional_file(path, "alignment_parameters.npz")
+    index_path = resolve_optional_file(path, "alignment_parameters_index.json")
+    if npz_path is None or index_path is None:
+        return None, None
+
+    packed = load_npz(npz_path)
+    index = load_json(index_path)
+    name_map = {item["name"]: item["key"] for item in index}
+    unpacked = {name: packed[key] for name, key in name_map.items() if key in packed}
+    return unpacked, name_map
 
 
 def compare_arrays(
@@ -102,11 +123,20 @@ def compare_arrays(
 
 def summarize_report(
     tensor_reports: List[Dict[str, object]],
+    parameter_reports: List[Dict[str, object]],
     loss_report: Dict[str, object] | None,
 ) -> Tuple[str, str | None]:
     first_issue = None
     overall = "pass"
     for report in tensor_reports:
+        if report["status"] == "fail":
+            overall = "fail"
+            first_issue = report["name"]
+            break
+        if report["status"] == "warn" and overall == "pass":
+            overall = "warn"
+            first_issue = report["name"]
+    for report in parameter_reports:
         if report["status"] == "fail":
             overall = "fail"
             first_issue = report["name"]
@@ -158,6 +188,30 @@ def main() -> int:
         report["name"] = name
         tensor_reports.append(report)
 
+    parameter_reports = []
+    baseline_params, baseline_param_map = load_parameter_bundle(args.baseline)
+    target_params, target_param_map = load_parameter_bundle(args.target)
+    missing_parameters_from_target = []
+    missing_parameters_from_baseline = []
+    if baseline_params is not None and target_params is not None:
+        missing_parameters_from_target = sorted(set(baseline_params) - set(target_params))
+        missing_parameters_from_baseline = sorted(set(target_params) - set(baseline_params))
+        common_param_names = sorted(set(baseline_params) & set(target_params))
+        for name in common_param_names:
+            report = compare_arrays(
+                baseline_params[name],
+                target_params[name],
+                warn_abs=args.warn_abs,
+                fail_abs=args.fail_abs,
+                warn_rel=args.warn_rel,
+                fail_rel=args.fail_rel,
+            )
+            report["name"] = name
+            parameter_reports.append(report)
+    else:
+        baseline_param_map = {}
+        target_param_map = {}
+
     loss_report = None
     baseline_summary_path = resolve_run_summary(args.baseline)
     target_summary_path = resolve_run_summary(args.target)
@@ -181,7 +235,7 @@ def main() -> int:
             "rel_diff": rel_diff,
         }
 
-    overall_status, first_issue = summarize_report(tensor_reports, loss_report)
+    overall_status, first_issue = summarize_report(tensor_reports, parameter_reports, loss_report)
     report = {
         "baseline_npz": baseline_npz,
         "target_npz": target_npz,
@@ -196,13 +250,21 @@ def main() -> int:
         "missing_from_target": missing_from_target,
         "missing_from_baseline": missing_from_baseline,
         "tensor_reports": tensor_reports,
+        "parameter_reports": parameter_reports,
+        "missing_parameters_from_target": missing_parameters_from_target,
+        "missing_parameters_from_baseline": missing_parameters_from_baseline,
         "loss_report": loss_report,
     }
 
-    if missing_from_target or missing_from_baseline:
+    if (
+        missing_from_target
+        or missing_from_baseline
+        or missing_parameters_from_target
+        or missing_parameters_from_baseline
+    ):
         report["overall_status"] = "fail"
         if report["first_issue"] is None:
-            report["first_issue"] = "missing_tensors"
+            report["first_issue"] = "missing_tensors_or_parameters"
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
