@@ -4,7 +4,8 @@ import math
 import os
 
 import mindspore as ms
-from mindspore import Parameter, Tensor
+import numpy as np
+from mindspore import Parameter, Tensor, nn
 import mindspore.mint as mint
 import mindspore.mint.nn as mint_nn
 import mindspore.mint.nn.functional as F
@@ -15,6 +16,7 @@ from shared_case_assets import (
     build_causal_mask,
     build_fixed_batch,
     build_shared_weights,
+    enable_alignment_determinism,
     get_case_config,
     set_global_seed,
     softmax_entropy,
@@ -24,13 +26,14 @@ from shared_case_assets import (
 
 
 def resolve_device_target():
-    for target in ("Ascend", "CPU"):
-        try:
-            ms.set_context(mode=ms.PYNATIVE_MODE, device_target=target)
-            return target
-        except Exception:
-            continue
-    return "Unknown"
+    try:
+        ms.set_context(mode=ms.PYNATIVE_MODE, device_target="Ascend")
+        return "Ascend"
+    except Exception as exc:
+        raise RuntimeError(
+            "This target script requires a MindSpore Ascend runtime. "
+            "CPU fallback is intentionally disabled for this migration case."
+        ) from exc
 
 
 def to_ms_dtype(name: str):
@@ -41,7 +44,7 @@ def to_ms_dtype(name: str):
     }[name]
 
 
-class TinyCausalLM(mint_nn.Module):
+class TinyCausalLM(nn.Cell):
     def __init__(self, cfg, weights, compute_dtype, alignment_mode=False):
         super().__init__()
         h = cfg["hidden_size"]
@@ -142,20 +145,25 @@ class TinyCausalLM(mint_nn.Module):
             "logits_mean": float(logits.astype(ms.float32).mean().asnumpy()),
             "logits_std": float(logits.astype(ms.float32).std().asnumpy()),
         }
+        alignment_tensors = None
         alignment_snapshot = None
         if self.alignment_mode:
+            alignment_tensors = {
+                "input_embeddings": to_numpy(self.token_embedding(input_ids)),
+                "ln1_output": to_numpy(h),
+                "q_proj_output": to_numpy(q),
+                "k_proj_output": to_numpy(k),
+                "v_proj_output": to_numpy(v),
+                "attn_scores": to_numpy(attn_scores),
+                "attn_probs": to_numpy(attn_probs),
+                "attn_context": to_numpy(attn_ctx),
+                "logits": to_numpy(logits),
+            }
             alignment_snapshot = [
-                summarize_tensor("input_embeddings", self.token_embedding(input_ids)),
-                summarize_tensor("ln1_output", h),
-                summarize_tensor("q_proj_output", q),
-                summarize_tensor("k_proj_output", k),
-                summarize_tensor("v_proj_output", v),
-                summarize_tensor("attn_scores", attn_scores),
-                summarize_tensor("attn_probs", attn_probs),
-                summarize_tensor("attn_context", attn_ctx),
-                summarize_tensor("logits", logits),
+                summarize_named_array(name, array)
+                for name, array in alignment_tensors.items()
             ]
-        return loss, debug, alignment_snapshot
+        return loss, debug, alignment_snapshot, alignment_tensors
 
 
 def model_summary(model):
@@ -176,11 +184,8 @@ def exact_gelu(x):
     return 0.5 * x * (1.0 + mint.erf(x * inv_sqrt2))
 
 
-def summarize_tensor(name, tensor):
-    return summarize_named_array(
-        name,
-        tensor.astype(ms.float32).asnumpy(),
-    )
+def to_numpy(tensor):
+    return tensor.astype(ms.float32).asnumpy()
 
 
 def main():
@@ -198,8 +203,15 @@ def main():
         if args.steps is None:
             cfg["steps"] = 1
 
-    set_global_seed(int(cfg["seed"]))
-    ms.set_seed(int(cfg["seed"]))
+    determinism_info = None
+    if args.alignment_mode:
+        determinism_info = enable_alignment_determinism(
+            int(cfg["seed"]),
+            use_mindspore=True,
+        )
+    else:
+        set_global_seed(int(cfg["seed"]))
+        ms.set_seed(int(cfg["seed"]))
     device_target = resolve_device_target()
     compute_dtype = to_ms_dtype(cfg["compute_dtype"])
     logger = JsonlLogger(args.output_dir, "target_mindspore_train.py")
@@ -212,6 +224,8 @@ def main():
         mindspore_version=ms.__version__,
         mode="PYNATIVE_MODE",
         alignment_mode=bool(args.alignment_mode),
+        deterministic_algorithms=bool(args.alignment_mode),
+        determinism_info=determinism_info,
     )
 
     weights = build_shared_weights(cfg)
@@ -228,7 +242,7 @@ def main():
     model = TinyCausalLM(cfg, weights, compute_dtype, alignment_mode=args.alignment_mode)
     optimizer = mint.optim.AdamW(
         model.trainable_params(),
-        learning_rate=cfg["learning_rate"],
+        lr=cfg["learning_rate"],
         betas=(cfg["adam_beta1"], cfg["adam_beta2"]),
         eps=cfg["adam_eps"],
         weight_decay=cfg["weight_decay"],
@@ -251,9 +265,9 @@ def main():
         grad_norm = None
         update_applied = False
         if args.alignment_mode:
-            loss, debug, alignment_snapshot = forward_fn(input_ids, labels)
+            loss, debug, alignment_snapshot, alignment_tensors = forward_fn(input_ids, labels)
         else:
-            (loss, debug, alignment_snapshot), grads = grad_fn(input_ids, labels)
+            (loss, debug, alignment_snapshot, alignment_tensors), grads = grad_fn(input_ids, labels)
             optimizer(grads)
             grad_norm_sq = 0.0
             for grad in grads:
@@ -277,6 +291,10 @@ def main():
                 encoding="utf-8",
             ) as f:
                 json.dump(alignment_record, f, indent=2)
+            np.savez_compressed(
+                os.path.join(args.output_dir, "alignment_tensors.npz"),
+                **alignment_tensors,
+            )
             logger.log("alignment_snapshot", step=step, tensors=alignment_snapshot)
         logger.log(
             "train_step",

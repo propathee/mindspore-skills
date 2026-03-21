@@ -3,15 +3,11 @@ import json
 import os
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-try:
-    import torch_npu  # noqa: F401
-    HAS_TORCH_NPU = True
-except ImportError:
-    HAS_TORCH_NPU = False
+import torch_npu  # noqa: F401
 
 from shared_case_assets import (
     JsonlLogger,
@@ -19,6 +15,7 @@ from shared_case_assets import (
     build_causal_mask,
     build_fixed_batch,
     build_shared_weights,
+    enable_alignment_determinism,
     get_case_config,
     set_global_seed,
     softmax_entropy,
@@ -28,9 +25,12 @@ from shared_case_assets import (
 
 
 def resolve_device() -> torch.device:
-    if HAS_TORCH_NPU and hasattr(torch, "npu") and torch.npu.is_available():
+    if hasattr(torch, "npu") and torch.npu.is_available():
         return torch.device("npu:0")
-    return torch.device("cpu")
+    raise RuntimeError(
+        "This baseline script requires a PyTorch torch_npu runtime with an "
+        "available NPU device. CPU fallback is intentionally disabled."
+    )
 
 
 def to_torch_dtype(name: str) -> torch.dtype:
@@ -137,20 +137,25 @@ class TinyCausalLM(nn.Module):
             "logits_mean": float(logits.float().mean().item()),
             "logits_std": float(logits.float().std().item()),
         }
+        alignment_tensors = None
         alignment_snapshot = None
         if self.alignment_mode:
+            alignment_tensors = {
+                "input_embeddings": to_numpy(self.token_embedding(input_ids)),
+                "ln1_output": to_numpy(h),
+                "q_proj_output": to_numpy(q),
+                "k_proj_output": to_numpy(k),
+                "v_proj_output": to_numpy(v),
+                "attn_scores": to_numpy(attn_scores),
+                "attn_probs": to_numpy(attn_probs),
+                "attn_context": to_numpy(attn_ctx),
+                "logits": to_numpy(logits),
+            }
             alignment_snapshot = [
-                summarize_tensor("input_embeddings", self.token_embedding(input_ids)),
-                summarize_tensor("ln1_output", h),
-                summarize_tensor("q_proj_output", q),
-                summarize_tensor("k_proj_output", k),
-                summarize_tensor("v_proj_output", v),
-                summarize_tensor("attn_scores", attn_scores),
-                summarize_tensor("attn_probs", attn_probs),
-                summarize_tensor("attn_context", attn_ctx),
-                summarize_tensor("logits", logits),
+                summarize_named_array(name, array)
+                for name, array in alignment_tensors.items()
             ]
-        return loss, debug, alignment_snapshot
+        return loss, debug, alignment_snapshot, alignment_tensors
 
 
 def named_parameter_summary(model):
@@ -172,11 +177,8 @@ def exact_gelu(x):
     return 0.5 * x * (1.0 + torch.erf(x * inv_sqrt2))
 
 
-def summarize_tensor(name, tensor):
-    return summarize_named_array(
-        name,
-        tensor.detach().float().cpu().numpy(),
-    )
+def to_numpy(tensor):
+    return tensor.detach().float().cpu().numpy()
 
 
 def main():
@@ -194,10 +196,18 @@ def main():
         if args.steps is None:
             cfg["steps"] = 1
 
-    set_global_seed(int(cfg["seed"]))
-    torch.manual_seed(int(cfg["seed"]))
-    if hasattr(torch, "npu") and hasattr(torch.npu, "manual_seed_all"):
-        torch.npu.manual_seed_all(int(cfg["seed"]))
+    determinism_info = None
+    if args.alignment_mode:
+        determinism_info = enable_alignment_determinism(
+            int(cfg["seed"]),
+            use_torch=True,
+            use_torch_npu=True,
+        )
+    else:
+        set_global_seed(int(cfg["seed"]))
+        torch.manual_seed(int(cfg["seed"]))
+        if hasattr(torch, "npu") and hasattr(torch.npu, "manual_seed_all"):
+            torch.npu.manual_seed_all(int(cfg["seed"]))
     device = resolve_device()
     compute_dtype = to_torch_dtype(cfg["compute_dtype"])
     logger = JsonlLogger(args.output_dir, "baseline_torch_npu_train.py")
@@ -208,8 +218,10 @@ def main():
         framework="pytorch",
         device=str(device),
         torch_version=torch.__version__,
-        torch_npu_available=HAS_TORCH_NPU,
+        torch_npu_available=True,
         alignment_mode=bool(args.alignment_mode),
+        deterministic_algorithms=bool(args.alignment_mode),
+        determinism_info=determinism_info,
     )
 
     weights = build_shared_weights(cfg)
@@ -243,7 +255,7 @@ def main():
     for step in range(1, int(cfg["steps"]) + 1):
         model.train()
         optimizer.zero_grad(set_to_none=True)
-        loss, debug, alignment_snapshot = model(input_ids, labels, causal_mask)
+        loss, debug, alignment_snapshot, alignment_tensors = model(input_ids, labels, causal_mask)
         grad_norm = None
         update_applied = False
         if not args.alignment_mode:
@@ -271,6 +283,10 @@ def main():
                 encoding="utf-8",
             ) as f:
                 json.dump(alignment_record, f, indent=2)
+            np.savez_compressed(
+                os.path.join(args.output_dir, "alignment_tensors.npz"),
+                **alignment_tensors,
+            )
             logger.log("alignment_snapshot", step=step, tensors=alignment_snapshot)
         logger.log(
             "train_step",

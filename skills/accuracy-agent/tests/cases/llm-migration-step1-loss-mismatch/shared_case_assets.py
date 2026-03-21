@@ -55,6 +55,64 @@ def set_global_seed(seed: int) -> None:
     np.random.seed(seed)
 
 
+def enable_alignment_determinism(
+    seed: int,
+    use_torch: bool = False,
+    use_torch_npu: bool = False,
+    use_mindspore: bool = False,
+) -> Dict[str, object]:
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ["HCCL_DETERMINISTIC"] = "true"
+    os.environ["ASCEND_LAUNCH_BLOCKING"] = "1"
+    os.environ["NCCL_DETERMINISTIC"] = "1"
+    set_global_seed(seed)
+
+    result: Dict[str, object] = {
+        "seed": seed,
+        "env": {
+            "PYTHONHASHSEED": os.environ["PYTHONHASHSEED"],
+            "HCCL_DETERMINISTIC": os.environ["HCCL_DETERMINISTIC"],
+            "ASCEND_LAUNCH_BLOCKING": os.environ["ASCEND_LAUNCH_BLOCKING"],
+            "NCCL_DETERMINISTIC": os.environ["NCCL_DETERMINISTIC"],
+        },
+    }
+
+    if use_torch:
+        import torch
+
+        torch.manual_seed(seed)
+        torch.use_deterministic_algorithms(True)
+        result["torch"] = {
+            "manual_seed": seed,
+            "use_deterministic_algorithms": True,
+        }
+
+    if use_torch_npu:
+        try:
+            import torch_npu
+
+            torch_npu.npu.manual_seed_all(seed)
+            torch_npu.npu.manual_seed(seed)
+            result["torch_npu"] = {
+                "manual_seed_all": seed,
+                "manual_seed": seed,
+            }
+        except Exception as exc:
+            result["torch_npu"] = {"status": f"unavailable: {exc!r}"}
+
+    if use_mindspore:
+        import mindspore as ms
+
+        ms.set_seed(seed)
+        ms.set_deterministic(True)
+        result["mindspore"] = {
+            "set_seed": seed,
+            "set_deterministic": True,
+        }
+
+    return result
+
+
 def get_case_config() -> Dict[str, object]:
     return dict(CASE_CONFIG)
 
