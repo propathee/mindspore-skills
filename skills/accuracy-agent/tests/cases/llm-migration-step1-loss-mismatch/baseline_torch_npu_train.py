@@ -17,7 +17,6 @@ from shared_case_assets import (
     build_shared_weights,
     enable_alignment_determinism,
     get_case_config,
-    set_global_seed,
     softmax_entropy,
     summarize_named_array,
     summarize_arrays,
@@ -68,6 +67,7 @@ class TinyCausalLM(nn.Module):
         self.lm_head = nn.Linear(h, v)
 
         self.load_shared_weights(weights)
+        self.to(dtype=compute_dtype)
 
     def load_shared_weights(self, weights):
         self.token_embedding.weight.data.copy_(torch.from_numpy(weights["token_embedding"]))
@@ -97,7 +97,7 @@ class TinyCausalLM(nn.Module):
         x = self.token_embedding(input_ids).to(self.compute_dtype)
         x = x + pos.to(x.dtype)
 
-        h = self.ln1(x.float()).to(x.dtype)
+        h = self.ln1(x)
         q = self.q_proj(h)
         k = self.k_proj(h)
         v = self.v_proj(h)
@@ -116,9 +116,9 @@ class TinyCausalLM(nn.Module):
         attn_ctx = attn_ctx.permute(0, 2, 1, 3).contiguous().view(batch_size, seq_len, -1)
         x = x + self.o_proj(attn_ctx)
 
-        m = self.ln2(x.float()).to(x.dtype)
+        m = self.ln2(x)
         x = x + self.fc2(exact_gelu(self.fc1(m)))
-        logits = self.lm_head(x.float())
+        logits = self.lm_head(x)
 
         shift_logits = logits[:, :-1, :].contiguous().view(-1, logits.shape[-1])
         shift_labels = labels[:, 1:].contiguous().view(-1)
@@ -209,37 +209,19 @@ def main():
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--alignment-mode", action="store_true")
     parser.add_argument("--alignment-allow-update", action="store_true")
-    parser.add_argument(
-        "--no-alignment-diff-reduction",
-        dest="alignment_diff_reduction",
-        action="store_false",
-        help="Keep deterministic alignment checks, but do not force extra diff-reduction steps such as compute_dtype=float32.",
-    )
-    parser.set_defaults(alignment_diff_reduction=True)
     args = parser.parse_args()
 
     cfg = get_case_config()
     if args.steps is not None:
         cfg["steps"] = args.steps
-    if args.alignment_mode and args.alignment_diff_reduction:
-        cfg["compute_dtype"] = "float32"
-        if args.steps is None:
-            cfg["steps"] = 1
-    elif args.alignment_mode and args.steps is None:
+    if args.alignment_mode and args.steps is None:
         cfg["steps"] = 1
 
-    determinism_info = None
-    if args.alignment_mode:
-        determinism_info = enable_alignment_determinism(
-            int(cfg["seed"]),
-            use_torch=True,
-            use_torch_npu=True,
-        )
-    else:
-        set_global_seed(int(cfg["seed"]))
-        torch.manual_seed(int(cfg["seed"]))
-        if hasattr(torch, "npu") and hasattr(torch.npu, "manual_seed_all"):
-            torch.npu.manual_seed_all(int(cfg["seed"]))
+    determinism_info = enable_alignment_determinism(
+        int(cfg["seed"]),
+        use_torch=True,
+        use_torch_npu=True,
+    )
     device = resolve_device()
     compute_dtype = to_torch_dtype(cfg["compute_dtype"])
     logger = JsonlLogger(args.output_dir, "baseline_torch_npu_train.py")
@@ -253,8 +235,7 @@ def main():
         torch_npu_available=True,
         alignment_mode=bool(args.alignment_mode),
         alignment_allow_update=bool(args.alignment_allow_update),
-        alignment_diff_reduction=bool(args.alignment_diff_reduction),
-        deterministic_algorithms=bool(args.alignment_mode),
+        deterministic_algorithms=True,
         determinism_info=determinism_info,
     )
 
@@ -310,7 +291,6 @@ def main():
                 "compute_dtype": cfg["compute_dtype"],
                 "softmax_path": "fp32_then_cast_back",
                 "alignment_allow_update": bool(args.alignment_allow_update),
-                "alignment_diff_reduction": bool(args.alignment_diff_reduction),
                 "tensors": alignment_snapshot,
             }
             with open(
@@ -344,7 +324,6 @@ def main():
         "final_loss": losses[-1],
         "alignment_mode": bool(args.alignment_mode),
         "alignment_allow_update": bool(args.alignment_allow_update),
-        "alignment_diff_reduction": bool(args.alignment_diff_reduction),
     }
     with open(os.path.join(args.output_dir, "run_summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)

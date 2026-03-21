@@ -5,7 +5,7 @@ import os
 
 import mindspore as ms
 import numpy as np
-from mindspore import Parameter, Tensor, amp, nn
+from mindspore import Parameter, Tensor, nn
 import mindspore.mint as mint
 import mindspore.mint.nn as mint_nn
 import mindspore.mint.nn.functional as F
@@ -18,7 +18,6 @@ from shared_case_assets import (
     build_shared_weights,
     enable_alignment_determinism,
     get_case_config,
-    set_global_seed,
     softmax_entropy,
     summarize_named_array,
     summarize_arrays,
@@ -73,36 +72,36 @@ class TinyCausalLM(nn.Cell):
         self.load_shared_weights(weights)
 
     def load_shared_weights(self, weights):
-        self.token_embedding.weight.set_data(Tensor(weights["token_embedding"], ms.float32))
-        self.position_embedding.set_data(Tensor(weights["position_embedding"], ms.float32))
-        self.ln1.weight.set_data(Tensor(weights["ln1_weight"], ms.float32))
-        self.ln1.bias.set_data(Tensor(weights["ln1_bias"], ms.float32))
-        self.q_proj.weight.set_data(Tensor(weights["q_proj_weight"], ms.float32))
-        self.q_proj.bias.set_data(Tensor(weights["q_proj_bias"], ms.float32))
-        self.k_proj.weight.set_data(Tensor(weights["k_proj_weight"], ms.float32))
-        self.k_proj.bias.set_data(Tensor(weights["k_proj_bias"], ms.float32))
-        self.v_proj.weight.set_data(Tensor(weights["v_proj_weight"], ms.float32))
-        self.v_proj.bias.set_data(Tensor(weights["v_proj_bias"], ms.float32))
-        self.o_proj.weight.set_data(Tensor(weights["o_proj_weight"], ms.float32))
-        self.o_proj.bias.set_data(Tensor(weights["o_proj_bias"], ms.float32))
-        self.ln2.weight.set_data(Tensor(weights["ln2_weight"], ms.float32))
-        self.ln2.bias.set_data(Tensor(weights["ln2_bias"], ms.float32))
-        self.fc1.weight.set_data(Tensor(weights["fc1_weight"], ms.float32))
-        self.fc1.bias.set_data(Tensor(weights["fc1_bias"], ms.float32))
-        self.fc2.weight.set_data(Tensor(weights["fc2_weight"], ms.float32))
-        self.fc2.bias.set_data(Tensor(weights["fc2_bias"], ms.float32))
-        self.lm_head.weight.set_data(Tensor(weights["lm_head_weight"], ms.float32))
-        self.lm_head.bias.set_data(Tensor(weights["lm_head_bias"], ms.float32))
+        self.token_embedding.weight.set_data(Tensor(weights["token_embedding"], self.compute_dtype))
+        self.position_embedding.set_data(Tensor(weights["position_embedding"], self.compute_dtype))
+        self.ln1.weight.set_data(Tensor(weights["ln1_weight"], self.compute_dtype))
+        self.ln1.bias.set_data(Tensor(weights["ln1_bias"], self.compute_dtype))
+        self.q_proj.weight.set_data(Tensor(weights["q_proj_weight"], self.compute_dtype))
+        self.q_proj.bias.set_data(Tensor(weights["q_proj_bias"], self.compute_dtype))
+        self.k_proj.weight.set_data(Tensor(weights["k_proj_weight"], self.compute_dtype))
+        self.k_proj.bias.set_data(Tensor(weights["k_proj_bias"], self.compute_dtype))
+        self.v_proj.weight.set_data(Tensor(weights["v_proj_weight"], self.compute_dtype))
+        self.v_proj.bias.set_data(Tensor(weights["v_proj_bias"], self.compute_dtype))
+        self.o_proj.weight.set_data(Tensor(weights["o_proj_weight"], self.compute_dtype))
+        self.o_proj.bias.set_data(Tensor(weights["o_proj_bias"], self.compute_dtype))
+        self.ln2.weight.set_data(Tensor(weights["ln2_weight"], self.compute_dtype))
+        self.ln2.bias.set_data(Tensor(weights["ln2_bias"], self.compute_dtype))
+        self.fc1.weight.set_data(Tensor(weights["fc1_weight"], self.compute_dtype))
+        self.fc1.bias.set_data(Tensor(weights["fc1_bias"], self.compute_dtype))
+        self.fc2.weight.set_data(Tensor(weights["fc2_weight"], self.compute_dtype))
+        self.fc2.bias.set_data(Tensor(weights["fc2_bias"], self.compute_dtype))
+        self.lm_head.weight.set_data(Tensor(weights["lm_head_weight"], self.compute_dtype))
+        self.lm_head.bias.set_data(Tensor(weights["lm_head_bias"], self.compute_dtype))
 
     def construct(self, input_ids, labels, causal_mask):
         batch_size, seq_len = input_ids.shape
         positions = mint.arange(seq_len, dtype=ms.int32)
         pos = self.position_embedding[positions]
 
-        x = self.token_embedding(input_ids).astype(self.compute_dtype)
-        x = x + pos.astype(x.dtype)
+        x = self.token_embedding(input_ids)
+        x = x + pos
 
-        h = self.ln1(x.astype(ms.float32)).astype(x.dtype)
+        h = self.ln1(x)
         q = self.q_proj(h)
         k = self.k_proj(h)
         v = self.v_proj(h)
@@ -124,9 +123,9 @@ class TinyCausalLM(nn.Cell):
         attn_ctx = mint.reshape(mint.permute(attn_ctx, (0, 2, 1, 3)), (batch_size, seq_len, -1))
         x = x + self.o_proj(attn_ctx)
 
-        m = self.ln2(x.astype(ms.float32)).astype(x.dtype)
+        m = self.ln2(x)
         x = x + self.fc2(exact_gelu(self.fc1(m)))
-        logits = self.lm_head(x.astype(ms.float32))
+        logits = self.lm_head(x)
 
         shift_logits = logits[:, :-1, :]
         shift_labels = labels[:, 1:]
@@ -216,34 +215,18 @@ def main():
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--alignment-mode", action="store_true")
     parser.add_argument("--alignment-allow-update", action="store_true")
-    parser.add_argument(
-        "--no-alignment-diff-reduction",
-        dest="alignment_diff_reduction",
-        action="store_false",
-        help="Keep deterministic alignment checks, but do not force extra diff-reduction steps such as compute_dtype=float32.",
-    )
-    parser.set_defaults(alignment_diff_reduction=True)
     args = parser.parse_args()
 
     cfg = get_case_config()
     if args.steps is not None:
         cfg["steps"] = args.steps
-    if args.alignment_mode and args.alignment_diff_reduction:
-        cfg["compute_dtype"] = "float32"
-        if args.steps is None:
-            cfg["steps"] = 1
-    elif args.alignment_mode and args.steps is None:
+    if args.alignment_mode and args.steps is None:
         cfg["steps"] = 1
 
-    determinism_info = None
-    if args.alignment_mode:
-        determinism_info = enable_alignment_determinism(
-            int(cfg["seed"]),
-            use_mindspore=True,
-        )
-    else:
-        set_global_seed(int(cfg["seed"]))
-        ms.set_seed(int(cfg["seed"]))
+    determinism_info = enable_alignment_determinism(
+        int(cfg["seed"]),
+        use_mindspore=True,
+    )
     device_target = resolve_device_target()
     compute_dtype = to_ms_dtype(cfg["compute_dtype"])
     logger = JsonlLogger(args.output_dir, "target_mindspore_train.py")
@@ -257,8 +240,7 @@ def main():
         mode="PYNATIVE_MODE",
         alignment_mode=bool(args.alignment_mode),
         alignment_allow_update=bool(args.alignment_allow_update),
-        alignment_diff_reduction=bool(args.alignment_diff_reduction),
-        deterministic_algorithms=bool(args.alignment_mode),
+        deterministic_algorithms=True,
         determinism_info=determinism_info,
     )
 
@@ -274,7 +256,6 @@ def main():
     )
 
     model = TinyCausalLM(cfg, weights, compute_dtype, alignment_mode=args.alignment_mode)
-    model = amp.auto_mixed_precision(model, amp_level="O0")
     optimizer = mint.optim.AdamW(
         model.trainable_params(),
         lr=cfg["learning_rate"],
@@ -319,7 +300,6 @@ def main():
                 "compute_dtype": cfg["compute_dtype"],
                 "softmax_path": "fp32_then_cast_back",
                 "alignment_allow_update": bool(args.alignment_allow_update),
-                "alignment_diff_reduction": bool(args.alignment_diff_reduction),
                 "tensors": alignment_snapshot,
             }
             with open(
@@ -353,7 +333,6 @@ def main():
         "final_loss": losses[-1],
         "alignment_mode": bool(args.alignment_mode),
         "alignment_allow_update": bool(args.alignment_allow_update),
-        "alignment_diff_reduction": bool(args.alignment_diff_reduction),
     }
     with open(os.path.join(args.output_dir, "run_summary.json"), "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
