@@ -91,7 +91,7 @@ class TinyDecoderBlock(nn.Module):
         )
 
         hidden_states = hidden_states + self.o_proj(attn_context)
-        ffn_output = self.fc2(torch.nn.functional.gelu(self.fc1(self.ln2(hidden_states)), approximate="tanh"))
+        ffn_output = self.fc2(torch.nn.functional.gelu(self.fc1(self.ln2(hidden_states)), approximate="none"))
         return hidden_states + ffn_output
 
 

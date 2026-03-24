@@ -31,7 +31,7 @@
     {
       "id": 2,
       "prompt": "I attached a small single-card Ascend migration case for a tiny transformer decoder block inference script. `baseline_torch_npu_infer.py` is the known-good PyTorch + torch_npu baseline. `target_mindspore_infer.py` is the MindSpore port. Both scripts generate exactly the same synthetic weights and exactly the same random input batches from `shared_case_assets.py`, and `compare_inference_outputs.py` verifies that the shared inputs and shared weights are bitwise aligned across the two runs. The migration requirement here is stricter than usual tolerance: every output tensor must align with zero deviation, but the compare script still reports non-zero absolute and relative error on the decoder outputs. Please diagnose this with the accuracy-agent workflow and recommend the smallest useful experiments first.",
-      "expected_output": "Recognizes a MindSpore Ascend inference accuracy case, respects the zero-diff requirement, confirms that inputs and weights are already exactly aligned, identifies the decoder block forward path and especially the LayerNorm implementation delta as the likely first hotspot, and proposes a minimal validating experiment and fix focused on the target LayerNorm path.",
+      "expected_output": "Recognizes a MindSpore Ascend inference accuracy case, respects the zero-diff requirement, confirms that inputs and weights are already exactly aligned, identifies the decoder block forward path and especially the LayerNorm default epsilon mismatch as the likely first hotspot, and proposes a minimal validating experiment and fix focused on aligning the target LayerNorm path.",
       "files": [
         "tests/cases/ascend-decoder-inference-zero-diff-layernorm-mismatch/README.md",
         "tests/cases/ascend-decoder-inference-zero-diff-layernorm-mismatch/shared_case_assets.py",
@@ -46,13 +46,41 @@
         "The answer explicitly respects the zero-diff acceptance requirement and does not dismiss the mismatch as acceptable tolerance.",
         "The answer confirms that inputs and weights are already exactly aligned, using the provided shared assets or compare script evidence.",
         "The answer identifies the first meaningful divergence stage as a forward-path module or output mismatch, not preprocessing or optimizer state.",
-        "The answer inspects or calls out the decoder block implementation itself, especially LayerNorm, as the earliest useful hotspot.",
-        "The answer notices that the MindSpore target uses mint operators except for `mindspore.nn.LayerNorm` and treats that as a likely cause family.",
+        "The answer inspects or calls out the decoder block implementation itself, especially the LayerNorm epsilon path, as the earliest useful hotspot.",
+        "The answer notices that the likely cause is a default LayerNorm epsilon mismatch between PyTorch and MindSpore rather than generic operator noise.",
         "The answer mentions Ascend backend precision behavior or operator semantic differences as relevant context.",
-        "The answer proposes small staged experiments such as comparing LayerNorm outputs, swapping only the LayerNorm implementation, or capturing intermediate decoder-block tensors.",
-        "The answer proposes a minimal validating fix consistent with replacing or isolating the target LayerNorm path before changing unrelated operators.",
+        "The answer proposes small staged experiments such as comparing LayerNorm outputs, explicitly aligning epsilon, swapping to `mint.nn.LayerNorm` as the recommended fix, or capturing intermediate decoder-block tensors.",
+        "The answer proposes a minimal validating fix consistent with either replacing the target LayerNorm with `mint.nn.LayerNorm` as the recommended option or explicitly setting `mindspore.nn.LayerNorm(epsilon=1e-5)` before changing unrelated operators.",
         "The answer includes validation criteria that require exact output equality on the provided batches after the fix.",
         "The answer avoids generic tuning advice such as learning-rate changes, retraining, or distributed debugging."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I attached a small single-card Ascend migration case for a tiny transformer decoder block inference script. `baseline_torch_npu_infer.py` is the known-good PyTorch + torch_npu baseline. `target_mindspore_infer.py` is the MindSpore port. Both scripts generate exactly the same synthetic weights and exactly the same random input batches from `shared_case_assets.py`, and `compare_inference_outputs.py` verifies that the shared inputs and shared weights are bitwise aligned across the two runs. This case was built so that LayerNorm and the rest of the main path are already aligned, but the compare script still reports non-zero absolute and relative error on the decoder outputs. Please diagnose this with the accuracy-agent workflow and recommend the smallest useful experiments first.",
+      "expected_output": "Recognizes a MindSpore Ascend inference accuracy case, respects the zero-diff requirement, confirms that inputs and weights are already exactly aligned, identifies the decoder block forward path and especially the GELU `approximate='none'` path as the likely first hotspot, and proposes a minimal validating experiment and fix focused on aligning the GELU path.",
+      "files": [
+        "tests/cases/ascend-decoder-inference-zero-diff-gelu-mismatch/README.md",
+        "tests/cases/ascend-decoder-inference-zero-diff-gelu-mismatch/shared_case_assets.py",
+        "tests/cases/ascend-decoder-inference-zero-diff-gelu-mismatch/baseline_torch_npu_infer.py",
+        "tests/cases/ascend-decoder-inference-zero-diff-gelu-mismatch/target_mindspore_infer.py",
+        "tests/cases/ascend-decoder-inference-zero-diff-gelu-mismatch/compare_inference_outputs.py",
+        "tests/cases/ascend-decoder-inference-zero-diff-gelu-mismatch/run_scenarios.sh"
+      ],
+      "expectations": [
+        "The answer classifies the case as a MindSpore accuracy diagnosis case, not a hard failure or performance issue.",
+        "The answer recognizes this as an Ascend inference or cross-framework output mismatch rather than a training or optimizer problem.",
+        "The answer explicitly respects the zero-diff acceptance requirement and does not dismiss the mismatch as acceptable tolerance.",
+        "The answer confirms that inputs and weights are already exactly aligned, using the provided shared assets or compare script evidence.",
+        "The answer identifies the first meaningful divergence stage as a forward-path module or output mismatch, not preprocessing or optimizer state.",
+        "The answer inspects or calls out the decoder block implementation itself, especially the GELU path, as the earliest useful hotspot.",
+        "The answer notices that LayerNorm has already been aligned with `mint.nn.LayerNorm` and should not be treated as the primary cause in this case.",
+        "The answer notices that the likely cause is GELU with `approximate='none'` rather than generic operator noise.",
+        "The answer mentions Ascend backend precision behavior or operator semantic differences as relevant context.",
+        "The answer proposes small staged experiments such as comparing GELU inputs and outputs, temporarily switching to `approximate=\"tanh\"`, or capturing intermediate decoder-block tensors around GELU.",
+        "The answer proposes a minimal validating fix consistent with aligning the GELU path, with switching to `approximate=\"tanh\"` as the recommended option.",
+        "The answer includes validation criteria that require exact output equality on the provided batches after the fix.",
+        "The answer avoids generic tuning advice such as learning-rate changes, retraining, distributed debugging, or redirecting the diagnosis to LayerNorm."
       ]
     }
   ]

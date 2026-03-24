@@ -5,7 +5,7 @@ import mindspore as ms
 import mindspore.mint as mint
 import mindspore.mint.nn as mint_nn
 import numpy as np
-from mindspore import Tensor, nn
+from mindspore import Tensor
 
 from shared_case_assets import (
     JsonlLogger,
@@ -53,8 +53,8 @@ def set_linear_params(layer, weight, bias):
 
 
 def set_layer_norm_params(layer, weight, bias):
-    set_parameter_attr(layer, ("gamma", "weight"), weight, "layer norm weight")
-    set_parameter_attr(layer, ("beta", "bias"), bias, "layer norm bias")
+    set_parameter_attr(layer, ("weight", "gamma"), weight, "layer norm weight")
+    set_parameter_attr(layer, ("bias", "beta"), bias, "layer norm bias")
 
 
 class TinyDecoderBlock(nn.Cell):
@@ -66,15 +66,15 @@ class TinyDecoderBlock(nn.Cell):
         self.head_dim = hidden_size // self.num_heads
         self.scale = attention_scale(cfg)
 
-        self.ln1 = nn.LayerNorm((hidden_size,), dtype=ms.float32)
+        self.ln1 = mint_nn.LayerNorm(hidden_size, eps=1e-5, dtype=ms.float32)
         self.q_proj = mint_nn.Linear(hidden_size, hidden_size, dtype=ms.float32)
         self.k_proj = mint_nn.Linear(hidden_size, hidden_size, dtype=ms.float32)
         self.v_proj = mint_nn.Linear(hidden_size, hidden_size, dtype=ms.float32)
         self.o_proj = mint_nn.Linear(hidden_size, hidden_size, dtype=ms.float32)
-        self.ln2 = nn.LayerNorm((hidden_size,), dtype=ms.float32)
+        self.ln2 = mint_nn.LayerNorm(hidden_size, eps=1e-5, dtype=ms.float32)
         self.fc1 = mint_nn.Linear(hidden_size, ffn_size, dtype=ms.float32)
         self.fc2 = mint_nn.Linear(ffn_size, hidden_size, dtype=ms.float32)
-        self.gelu = mint_nn.GELU(approximate="tanh")
+        self.gelu = mint_nn.GELU(approximate="none")
 
     def load_shared_weights(self, weights):
         set_layer_norm_params(self.ln1, weights["ln1_weight"], weights["ln1_bias"])

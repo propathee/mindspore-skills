@@ -8,11 +8,11 @@
     "The answer explicitly respects the zero-diff acceptance requirement and does not dismiss the mismatch as acceptable tolerance.",
     "The answer confirms that inputs and weights are already exactly aligned, using the provided shared assets or compare script evidence.",
     "The answer identifies the first meaningful divergence stage as a forward-path module or output mismatch, not preprocessing or optimizer state.",
-    "The answer inspects or calls out the decoder block implementation itself, especially LayerNorm, as the earliest useful hotspot.",
-    "The answer notices that the MindSpore target uses mint operators except for `mindspore.nn.LayerNorm` and treats that as a likely cause family.",
+    "The answer inspects or calls out the decoder block implementation itself, especially the LayerNorm epsilon path, as the earliest useful hotspot.",
+    "The answer notices that the likely cause is a default LayerNorm epsilon mismatch between PyTorch and MindSpore rather than generic operator noise.",
     "The answer mentions Ascend backend precision behavior or operator semantic differences as relevant context.",
-    "The answer proposes small staged experiments such as comparing LayerNorm outputs, swapping only the LayerNorm implementation, or capturing intermediate decoder-block tensors.",
-    "The answer proposes a minimal validating fix consistent with replacing or isolating the target LayerNorm path before changing unrelated operators.",
+    "The answer proposes small staged experiments such as comparing LayerNorm outputs, explicitly aligning epsilon, swapping to `mint.nn.LayerNorm` as the recommended fix, or capturing intermediate decoder-block tensors.",
+    "The answer proposes a minimal validating fix consistent with either replacing the target LayerNorm with `mint.nn.LayerNorm` as the recommended option or explicitly setting `mindspore.nn.LayerNorm(epsilon=1e-5)` before changing unrelated operators.",
     "The answer includes validation criteria that require exact output equality on the provided batches after the fix.",
     "The answer avoids generic tuning advice such as learning-rate changes, retraining, or distributed debugging."
   ]

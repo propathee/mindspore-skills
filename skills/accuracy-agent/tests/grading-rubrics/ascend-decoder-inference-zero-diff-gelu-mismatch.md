@@ -1,16 +1,14 @@
-# Grading Rubric: Ascend Decoder Inference Zero-Diff LayerNorm Mismatch
+# Grading Rubric: Ascend Decoder Inference Zero-Diff GELU Mismatch
 
 Use this file when grading the run for this eval. This is a grader-facing
 rubric, not an input for the evaluated agent.
 
 ## Purpose
 
-The point of this eval is to judge whether the skill can handle a stricter
-than usual migration requirement: exact output equality across a PyTorch +
-`torch_npu` baseline and a MindSpore Ascend port for a tiny decoder block.
-
-Inputs and weights are already aligned. The judged answer should not waste the
-main diagnosis path on data mismatch guesses.
+The point of this eval is to judge whether the skill can isolate a single
+operator precision issue after the rest of the decoder-block path has already
+been aligned. Inputs, weights, and LayerNorm are intentionally not the main
+problem in this case.
 
 ## Primary Grading Dimensions
 
@@ -34,18 +32,21 @@ Pass when the answer:
 - explicitly respects the zero-diff requirement
 - acknowledges that shared inputs and shared weights are already exactly
   aligned
+- acknowledges that LayerNorm has already been intentionally aligned
 
 Fail when the answer:
 
 - says the mismatch is small enough to ignore
-- assumes inputs or weights differ without using the supplied evidence
+- assumes inputs, weights, or LayerNorm are still the main issue without using
+  the supplied evidence
 
 ### 3. First-Divergence Reasoning
 
 Pass when the answer:
 
 - frames the mismatch as a forward-path module or output mismatch
-- points to the decoder block internals as the next place to inspect
+- points to the decoder block internals and especially GELU as the next place
+  to inspect
 
 Fail when the answer:
 
@@ -56,15 +57,17 @@ Fail when the answer:
 
 Pass when the answer:
 
-- identifies LayerNorm as a likely hotspot
-- identifies default `LayerNorm` epsilon mismatch as the key likely cause
+- identifies GELU as a likely hotspot
+- notices `approximate='none'` as the key likely cause
+- avoids blaming LayerNorm after it has already been aligned with
+  `mint.nn.LayerNorm`
 - mentions Ascend backend precision or operator-semantic differences as useful
   context
 
 Fail when the answer:
 
 - only names vague causes with no code-grounded reasoning
-- focuses on unrelated operators before acknowledging the LayerNorm epsilon
+- focuses on LayerNorm or unrelated operators before acknowledging the GELU
   delta
 
 ### 5. Experiment Quality
@@ -72,10 +75,9 @@ Fail when the answer:
 Pass when the answer:
 
 - proposes small validating experiments
-- includes intermediate tensor comparison around LayerNorm or nearby outputs
-- proposes a minimal fix such as replacing with `mint.nn.LayerNorm`
-  as the recommended option, or
-  explicitly aligning `mindspore.nn.LayerNorm(epsilon=1e-5)`
+- includes intermediate tensor comparison around GELU or nearby outputs
+- proposes a minimal fix such as switching to `approximate="tanh"` as the
+  recommended option
 
 Fail when the answer:
 
@@ -87,16 +89,14 @@ Fail when the answer:
 A strong answer usually has this shape:
 
 1. This is a MindSpore inference accuracy case on Ascend.
-2. Inputs and weights are already exactly aligned, so start in the forward
-   path.
+2. Inputs and weights are already exactly aligned, and LayerNorm is already
+   aligned, so start in the forward path.
 3. Because exact equality is required, even tiny drift is a real failure here.
-4. Inspect the decoder block implementation and isolate the LayerNorm path
-   first.
-5. Compare LayerNorm outputs and then the final decoder outputs on the fixed
-   batches.
-6. Try the smallest fix: replace `mindspore.nn.LayerNorm` with
-   `mint.nn.LayerNorm` as the recommended option, or explicitly set
-   `epsilon=1e-5` to match torch.
+4. Inspect the decoder block implementation and isolate the GELU path first.
+5. Compare GELU inputs, GELU outputs, and then the final decoder outputs on
+   the fixed batches.
+6. Try the smallest fix: switch to `approximate="tanh"` as the recommended
+   option, or otherwise use an explicitly aligned GELU path.
 7. Validate by rerunning the same batches and requiring zero output diff.
 
 ## Common Failure Modes
@@ -105,5 +105,5 @@ A strong answer usually has this shape:
 - Ignoring the provided compare script evidence about exact input and weight
   alignment
 - Suggesting optimizer, learning-rate, or training-loop changes
-- Missing the default LayerNorm epsilon mismatch in the target script
-- Recommending broad operator rewrites before isolating the single known delta
+- Missing the `approximate='none'` GELU mismatch in the target script
+- Re-blaming LayerNorm even though the case already aligned it
