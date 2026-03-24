@@ -1,0 +1,19 @@
+{
+  "eval_id": 2,
+  "eval_name": "ascend-decoder-inference-zero-diff-layernorm-mismatch",
+  "prompt": "I attached a small single-card Ascend migration case for a tiny transformer decoder block inference script. `baseline_torch_npu_infer.py` is the known-good PyTorch + torch_npu baseline. `target_mindspore_infer.py` is the MindSpore port. Both scripts generate exactly the same synthetic weights and exactly the same random input batches from `shared_case_assets.py`, and `compare_inference_outputs.py` verifies that the shared inputs and shared weights are bitwise aligned across the two runs. The migration requirement here is stricter than usual tolerance: every output tensor must align with zero deviation, but the compare script still reports non-zero absolute and relative error on the decoder outputs. Please diagnose this with the accuracy-agent workflow and recommend the smallest useful experiments first.",
+  "assertions": [
+    "The answer classifies the case as a MindSpore accuracy diagnosis case, not a hard failure or performance issue.",
+    "The answer recognizes this as an Ascend inference or cross-framework output mismatch rather than a training or optimizer problem.",
+    "The answer explicitly respects the zero-diff acceptance requirement and does not dismiss the mismatch as acceptable tolerance.",
+    "The answer confirms that inputs and weights are already exactly aligned, using the provided shared assets or compare script evidence.",
+    "The answer identifies the first meaningful divergence stage as a forward-path module or output mismatch, not preprocessing or optimizer state.",
+    "The answer inspects or calls out the decoder block implementation itself, especially LayerNorm, as the earliest useful hotspot.",
+    "The answer notices that the MindSpore target uses mint operators except for `mindspore.nn.LayerNorm` and treats that as a likely cause family.",
+    "The answer mentions Ascend backend precision behavior or operator semantic differences as relevant context.",
+    "The answer proposes small staged experiments such as comparing LayerNorm outputs, swapping only the LayerNorm implementation, or capturing intermediate decoder-block tensors.",
+    "The answer proposes a minimal validating fix consistent with replacing or isolating the target LayerNorm path before changing unrelated operators.",
+    "The answer includes validation criteria that require exact output equality on the provided batches after the fix.",
+    "The answer avoids generic tuning advice such as learning-rate changes, retraining, or distributed debugging."
+  ]
+}
