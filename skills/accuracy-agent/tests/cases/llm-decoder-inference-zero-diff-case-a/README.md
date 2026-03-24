@@ -1,4 +1,4 @@
-# Tiny Decoder Inference Zero-Diff Alignment Case
+# Tiny Decoder Inference Zero-Diff Case A
 
 This case is a small end-to-end accuracy-diagnosis scenario for
 `accuracy-agent`.
@@ -16,15 +16,11 @@ The case simulates a common migration pattern:
 
 - a `torch_npu` inference script is ported to MindSpore
 - the port keeps the same decoder block structure and the same shared weights
-- both sides use `tanh` GELU so GELU itself is not the mismatch source
 - most target-side operators use `mindspore.mint`
-- the intentional accuracy issue comes from leaving `LayerNorm` at framework
-  defaults:
-  - PyTorch `nn.LayerNorm` defaults `eps=1e-5`
-  - MindSpore `nn.LayerNorm` defaults `epsilon=1e-7`
-- this simulates a migration bug where the developer assumes the two
-  `LayerNorm` APIs are behaviorally identical and forgets to align the default
-  epsilon
+- at least one forward-path operator or parameter path is still not fully
+  aligned across frameworks
+- the intended task is to locate the first real mismatch from evidence, rather
+  than guess from the case description
 
 ## Files
 
@@ -34,8 +30,7 @@ The case simulates a common migration pattern:
 - `baseline_torch_npu_infer.py`
   - known-good PyTorch + `torch_npu` decoder-block inference script
 - `target_mindspore_infer.py`
-  - MindSpore decoder-block inference script using `mint` operators for the
-    main path, `mindspore.nn.LayerNorm`, and default `epsilon`
+  - MindSpore decoder-block inference script for the migrated decoder block
 - `compare_inference_outputs.py`
   - verifies exact input and weight alignment, then reports output tensor
     mismatch statistics batch by batch
@@ -51,13 +46,11 @@ The evaluated agent should:
 3. verify that inputs and weights are already exactly aligned
 4. respect the zero-diff acceptance requirement instead of dismissing the
    mismatch as acceptable tolerance
-5. identify the decoder block forward path, especially the `LayerNorm`
-   epsilon path, as the earliest useful place to inspect
+5. identify the decoder block forward path as the earliest useful place to
+   inspect, then narrow further from code and tensor evidence
 6. recommend the smallest validating experiment first
-7. propose a minimal fix such as:
-   - replacing the target `LayerNorm` with `mint.nn.LayerNorm` (recommended)
-   - or explicitly setting `mindspore.nn.LayerNorm(epsilon=1e-5)` to align
-     with torch
+7. propose a minimal fix only after isolating the first operator or parameter
+   mismatch
 
 ## Suggested Commands
 

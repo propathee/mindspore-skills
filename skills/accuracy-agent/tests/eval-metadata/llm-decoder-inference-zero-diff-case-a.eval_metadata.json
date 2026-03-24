@@ -1,6 +1,6 @@
 {
   "eval_id": 2,
-  "eval_name": "ascend-decoder-inference-zero-diff-layernorm-mismatch",
+  "eval_name": "llm-decoder-inference-zero-diff-case-a",
   "prompt": "I attached a small single-card Ascend migration case for a tiny transformer decoder block inference script. `baseline_torch_npu_infer.py` is the known-good PyTorch + torch_npu baseline. `target_mindspore_infer.py` is the MindSpore port. Both scripts generate exactly the same synthetic weights and exactly the same random input batches from `shared_case_assets.py`, and `compare_inference_outputs.py` verifies that the shared inputs and shared weights are bitwise aligned across the two runs. The migration requirement here is stricter than usual tolerance: every output tensor must align with zero deviation, but the compare script still reports non-zero absolute and relative error on the decoder outputs. Please diagnose this with the accuracy-agent workflow and recommend the smallest useful experiments first.",
   "assertions": [
     "The answer classifies the case as a MindSpore accuracy diagnosis case, not a hard failure or performance issue.",

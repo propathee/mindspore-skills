@@ -13,7 +13,11 @@ and validation plan. Do not list generic guesses.
 ## Golden Rules
 
 - Align baseline and current conditions before drawing conclusions.
+- Confirm whether the user should expect exact zero-diff or only acceptable
+  numerical alignment before launching heavy operator-level equality work.
 - Find the first divergence point before recommending a fix.
+- When operator inputs are already zero-diff but outputs drift, confirm the
+  operator by checking API parameters first, then try a standalone repro.
 - Prefer the smallest validating experiment that can confirm or reject a cause.
 - Keep fixes tied to validation criteria. A "fix" without a verification step
   is only a hypothesis.
@@ -51,8 +55,13 @@ Read only the reference file that matches the current need:
   - Read when choosing between capture, compare, monitoring, or manual methods.
 - `references/ascend-precision-notes.md`
   - Read when the case involves Ascend backend behavior or mixed precision.
+- `references/determinism-setup.md`
+  - Read when exact-alignment work depends on deterministic execution, or when
+    multiple frameworks need different determinism settings.
 - `references/validation-ladder.md`
   - Read when turning a hypothesis into a staged validation plan.
+- `references/examples.md`
+  - Read when you want concrete diagnosis patterns or need a worked scenario.
 
 ## Workflow
 
@@ -78,12 +87,14 @@ Reduce noise before comparing anything:
 - Use the same weights, or document exactly how weights differ.
 - Use the same input data and sample order.
 - Prefer single card and single machine if possible.
-- Fix randomness. Use `mindspore.set_deterministic(True)` when available.
+- Fix randomness with framework-specific settings, not just one generic switch.
 - Disable unnecessary randomness such as dropout or shuffle during comparison.
 - Prefer a smaller model, shorter run, or smaller dataset slice.
 - Temporarily disable graph optimizations that may change numerical behavior
   when the goal is diagnosis rather than performance.
 - Record framework, runtime, hardware, precision, and configuration deltas.
+- Decide the comparison contract early: exact zero-diff or tolerance-based
+  alignment.
 - If the baseline may vary naturally, run it twice to understand variance
   before treating small differences as a bug.
 
@@ -94,6 +105,28 @@ If Factory query tooling is available and the model identity is known,
 inspect `model` cards now to establish expected context, known constraints,
 and model-specific comparison caveats before deeper diagnosis.
 
+If exact alignment matters, read `references/determinism-setup.md`. The
+canonical example lives in
+`tests/cases/llm-decoder-inference-zero-diff-case-a/shared_case_assets.py`
+as `enable_alignment_determinism()`.
+
+Before planning expensive exact-equality experiments, confirm whether exact
+zero-diff is actually expected:
+
+- exact zero-diff is usually realistic only when the two sides should execute
+  the same underlying operator path, such as some `torch_npu` versus
+  MindSpore-on-Ascend comparisons
+- exact zero-diff also depends on determinism being enabled and on the relevant
+  nondeterministic sources being controlled
+- cross-hardware or cross-chip comparisons such as GPU versus Ascend, or
+  different Ascend chip families, often should be treated as tolerance-based
+  alignment problems rather than exact-equality problems
+- if the expectation is unclear, ask the user whether the target is exact
+  zero-diff or only "no material regression"
+- if exact zero-diff is not expected, do not default into heavy same-input,
+  same-output operator chasing; first locate the earliest materially large
+  mismatch instead
+
 > Checkpoint
 > Do not continue until these are true:
 >
@@ -101,6 +134,7 @@ and model-specific comparison caveats before deeper diagnosis.
 > 2. Input data and data order are comparable.
 > 3. Randomness has been controlled.
 > 4. Major environment and precision differences are recorded.
+> 5. The comparison contract is clear: exact zero-diff or tolerance-based.
 
 ### Step 3: Find the First Divergence Stage
 
@@ -133,7 +167,61 @@ existing test thresholds, model acceptance criteria, or task-specific history.
 > 2. the evidence used to identify it
 > 3. any still-missing facts that weaken confidence
 
-### Step 4: Choose the Right Diagnosis Branch
+If the first useful mismatch has already narrowed to a specific operator
+boundary and the two sides consume the same input tensor values, do not stop at
+"this operator looks suspicious." Continue with Step 4 and try to prove or
+disprove the operator as the cause.
+
+### Step 4: Confirm a Suspect Operator When Inputs Match but Outputs Drift
+
+Use this step when you find a candidate operator whose inputs are already
+aligned, or have zero meaningful deviation for the case, but whose outputs no
+longer match.
+
+Do not enter this step by default for every mismatch. Use it when exact
+operator-level equality is actually expected, or when the operator-level drift
+is large enough to explain the user-visible regression.
+
+First inspect the operator call itself before blaming backend precision:
+
+- compare the exact operator API used on both sides
+- compare explicit parameters, keyword arguments, defaults, and mode flags
+- compare dtype, cast path, tensor layout, and any backend-specific switches
+- check whether one side silently relies on a default attribute the other side
+  sets explicitly
+
+If the parameter combination is not aligned, align it first and rerun the same
+upstream experiment before going deeper. Treat parameter misalignment as the
+first fix candidate, not as a minor note.
+
+If the parameter combination is already aligned, try to build a standalone
+single-operator repro:
+
+- generate several random tensors with different shapes
+- try more than one dtype when the real case makes that relevant
+- feed the exact same input tensors into the two operator implementations
+- compare outputs on multiple data combinations rather than a single lucky case
+- record whether the issue is easy to reproduce, shape-dependent,
+  dtype-dependent, value-dependent, or still not reproduced
+
+If repeated standalone trials still do not reproduce the mismatch:
+
+- dump the suspect operator's real inputs and outputs from the model script
+- replay the dumped inputs in a standalone operator case
+- check whether the mismatch becomes reproducible with real captured data
+
+The goal is not just to name a suspicious operator. The goal is to pin down
+whether this operator is truly responsible, and whether the issue is
+deterministic, intermittent, or still unproven.
+
+> Checkpoint
+> Before choosing a broad diagnosis branch, state:
+>
+> 1. whether operator API parameters are aligned
+> 2. whether a standalone single-operator repro was attempted
+> 3. whether the issue is reproducible, intermittent, or not yet reproduced
+
+### Step 5: Choose the Right Diagnosis Branch
 
 Pick one primary branch. Use `references/diagnosis-branches.md` for the full
 checklist.
@@ -146,6 +234,9 @@ Treat this as a forward-path problem first:
 - check preprocessing, tokenizer, padding, mask, and labels
 - check dtype, AMP, cast path, and operator semantics
 - compare tensors from coarse modules down to the first mismatching node
+- if the mismatch narrows to one operator with aligned inputs, use Step 4 to
+  compare API parameters and build a standalone repro before escalating to a
+  kernel-level suspicion
 
 Read `references/ascend-precision-notes.md` for Ascend-specific precision
 traps.
@@ -181,6 +272,11 @@ Focus on deterministic comparison of the final path:
 - inspect postprocessing and metric implementation
 - inspect dtype, backend kernel path, and preprocessing differences
 - narrow from output mismatch to the earliest internal mismatch that matters
+- decide first whether this case should target exact zero-diff or only
+  acceptable tolerance, based on hardware, backend path, and determinism
+- if the first internal mismatch is one operator with zero-diff inputs, check
+  parameter alignment first and then try to reproduce it in a standalone
+  operator case
 
 If Ascend backend behavior or mixed precision looks relevant, also read
 `references/ascend-precision-notes.md`.
@@ -198,7 +294,7 @@ If none of the branches fits cleanly, do not invent a new branch too early.
 Return to Step 2 and Step 3, reduce scope further, and find an earlier
 comparison point before proposing causes.
 
-### Step 5: Query Known Failure Knowledge When Evidence Sharpens
+### Step 6: Query Known Failure Knowledge When Evidence Sharpens
 
 If Factory query tooling is available, inspect `known_failure` or future
 accuracy knowledge assets after the first divergence stage is known. Use the
@@ -221,7 +317,7 @@ matches. Examples include:
 Treat `known_failure` lookup as evidence support, not a substitute for baseline
 comparison or first-divergence analysis.
 
-### Step 6: Rank Root-Cause Candidates
+### Step 7: Rank Root-Cause Candidates
 
 Rank one to three candidates. Use families like:
 
@@ -238,9 +334,11 @@ For each candidate, include:
 - what it is
 - which evidence supports it
 - what evidence is still missing
+- whether standalone operator repro evidence exists, if operator suspicion is
+  part of the case
 - confidence: high, medium, or low
 
-### Step 7: Recommend the Smallest Validating Fix
+### Step 8: Recommend the Smallest Validating Fix
 
 For each candidate, provide:
 
@@ -251,7 +349,7 @@ For each candidate, provide:
 
 Prefer "test this precise hypothesis" over "change many knobs."
 
-### Step 8: Follow a Validation Ladder
+### Step 9: Follow a Validation Ladder
 
 Validate from cheapest to most expensive. Use
 `references/validation-ladder.md` when the plan needs more detail.
@@ -299,7 +397,8 @@ Field intent:
 - `First Divergence Stage`
   - The earliest meaningful mismatch and the evidence behind it.
 - `Evidence Collected`
-  - Loss, tensors, gradients, configs, metrics, checkpoints, or statistics.
+  - Loss, tensors, gradients, configs, metrics, checkpoints, operator
+    parameters, standalone repro results, or statistics.
 - `Knowledge Lookup`
   - Whether `model` or `known_failure` knowledge was checked and whether it matched.
 - `Ranked Root-Cause Candidates`
@@ -320,63 +419,36 @@ Field intent:
 - Do not blame the optimizer when step1 loss is already mismatched.
 - Do not compare tensors blindly across different precision modes without
   explaining the precision context.
+- Do not assume exact zero-diff is realistic across heterogeneous hardware or
+  different chip models unless the user and execution path justify that target.
+- Do not accuse one operator based only on "same input, different output"
+  until you have checked parameter alignment and attempted a standalone repro.
 - Do not claim exact equality is required when the task only needs acceptable
   numerical alignment.
+- Do not launch heavy zero-diff operator experiments before confirming that
+  exact equality is the intended goal.
 - Do not hide uncertainty. If baseline alignment is weak, say so.
 - Do not skip the alignment checkpoint just because the symptom "looks obvious."
 
 ## Examples
 
-### Example 1: Step1 Loss Mismatch Against a Trusted Baseline
+Concrete worked scenarios live in `references/examples.md`. Read that file only
+when the current case is ambiguous, when you need a pattern to imitate, or when
+you want examples of:
 
-**User says:**
-
-> With the same weights and the same batch, PyTorch on Ascend gives step1 loss
-> `2.1431`, but MindSpore on Ascend gives `2.3128`. Both runs are single-card,
-> dropout is disabled, and batch size is 1. I want to know where they first
-> diverge.
-
-**Expected behavior:**
-
-- classify this as `step1 loss mismatch`
-- confirm weights, input order, precision, and determinism before deeper claims
-- treat it as a forward-path problem first
-- recommend tensor comparison from coarse modules down to the first mismatch
-- avoid optimizer-focused advice
-
-### Example 2: Later Training Divergence
-
-**User says:**
-
-> Step1 loss is aligned with the previous good run, but after around step 50 the
-> local norm and loss curve start drifting. Final validation accuracy is much
-> worse.
-
-**Expected behavior:**
-
-- classify this as `step1 loss matches but later diverges`
-- inspect gradients, local norm, one-step update, optimizer settings, and
-  parallel differences
-- suggest an `lr=0` or no-update experiment before broad tuning
-- avoid re-running forward-only comparisons as the primary path
-
-### Example 3: Crash Misrouted as Accuracy
-
-**User says:**
-
-> Training stops at step 3 with a RuntimeError. After that the log shows NaN in
-> the loss.
-
-**Expected behavior:**
-
-- say this is not an accuracy-only entry point because execution failed
-- do not enter the non-fatal NaN or Inf branch
-- ask for failure evidence or redirect the user to failure diagnosis
+- trusted-baseline step1 loss mismatch
+- later-stage training divergence
+- crash cases that should be redirected to `failure-agent`
+- zero-diff operator input but mismatched output
+- cross-hardware mismatch where zero-diff should not be assumed
 
 ## Key Rules
 
 - Align first.
+- Confirm the comparison contract before choosing exact-equality tactics.
 - Find the first divergence stage.
+- When one operator has same-input but different-output behavior, check
+  parameters first and then force a standalone repro.
 - Pick one primary branch.
 - Validate the smallest fix first.
 - If evidence changes, revise the diagnosis instead of defending the old one.

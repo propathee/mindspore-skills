@@ -1,4 +1,4 @@
-# Grading Rubric: Ascend Decoder Inference Zero-Diff GELU Mismatch
+# Grading Rubric: LLM Decoder Inference Zero-Diff Case B
 
 Use this file when grading the run for this eval. This is a grader-facing
 rubric, not an input for the evaluated agent.

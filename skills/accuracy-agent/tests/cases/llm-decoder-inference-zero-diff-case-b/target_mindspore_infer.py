@@ -5,7 +5,7 @@ import mindspore as ms
 import mindspore.mint as mint
 import mindspore.mint.nn as mint_nn
 import numpy as np
-from mindspore import Tensor
+from mindspore import Tensor, nn
 
 from shared_case_assets import (
     JsonlLogger,
