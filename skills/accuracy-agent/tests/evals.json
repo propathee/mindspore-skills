@@ -18,6 +18,12 @@
       "prompt": "Training stops at step 2 with a RuntimeError and then I see NaN in the log. Can the accuracy-agent help me diagnose it?",
       "expected_output": "Rejects the case as a pure accuracy entry point because execution failed, asks for failure evidence or redirects to failure diagnosis instead of using the NaN branch.",
       "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "I aligned weights, inputs, and step1 compare hooks, and now the first stable mismatch is on a single operator between PyTorch and MindSpore. What should I verify before I conclude the MindSpore operator is wrong?",
+      "expected_output": "Requires checking whether the two model scripts pass fully aligned operator arguments including implicit defaults, asks for a minimal single-operator repro to confirm the issue outside the full model, and only then suggests trying a non-legacy replacement such as a mint operator or a reimplementation.",
+      "files": []
     }
   ]
 }

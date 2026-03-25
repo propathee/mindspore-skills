@@ -16,5 +16,6 @@ def test_skill_markers_present():
 
 def test_reference_and_script_files_exist():
     assert (SKILL_ROOT / "references" / "consistency-validation.md").exists()
+    assert (SKILL_ROOT / "references" / "operator-accuracy-triage.md").exists()
     assert (SKILL_ROOT / "scripts" / "collect_accuracy_context.py").exists()
     assert (SKILL_ROOT / "scripts" / "summarize_metric_diff.py").exists()

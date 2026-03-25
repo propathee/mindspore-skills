@@ -23,7 +23,9 @@ Recommended sequence:
 2. Check preprocessing outputs before entering the model.
 3. Compare model outputs at coarse module boundaries.
 4. Narrow to the first mismatching node or operator.
-5. Only then talk about a concrete fix.
+5. If the mismatch is stable at one operator, switch to operator-level triage
+   before attributing the bug to the implementation.
+6. Only then talk about a concrete fix.
 
 Do not:
 

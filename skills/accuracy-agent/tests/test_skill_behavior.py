@@ -17,6 +17,7 @@ def test_accuracy_profile_and_consistency_validation_are_present():
     text = SKILL_MD.read_text(encoding="utf-8")
     assert "Build an `AccuracyProfile`" in text
     assert "Return ranked root-cause candidates with:" in text
+    assert "- dtype, precision, and API parameter consistency" in text
     assert "- confidence" in text
     assert "- evidence" in text
     assert "- validation checks" in text
@@ -26,5 +27,14 @@ def test_accuracy_profile_and_consistency_validation_are_present():
 def test_references_and_scripts_are_declared():
     text = SKILL_MD.read_text(encoding="utf-8")
     assert "`references/consistency-validation.md`" in text
+    assert "`references/operator-accuracy-triage.md`" in text
     assert "`scripts/collect_accuracy_context.py`" in text
     assert "`scripts/summarize_metric_diff.py`" in text
+
+
+def test_operator_triage_reference_tracks_official_api_mapping():
+    text = (SKILL_MD.parent / "references" / "operator-accuracy-triage.md").read_text(
+        encoding="utf-8"
+    )
+    assert "https://www.mindspore.cn/docs/zh-CN/master/note/api_mapping/pytorch_api_mapping.html" in text
+    assert "official PyTorch-to-MindSpore API" in text

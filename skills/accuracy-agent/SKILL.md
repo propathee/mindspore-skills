@@ -92,9 +92,13 @@ At minimum, validate across these groups when relevant:
 - config consistency
 - model consistency
 - checkpoint consistency
-- dtype and precision consistency
+- dtype, precision, and API parameter consistency
 - framework or platform consistency
 - metric and evaluation consistency
+
+If the first stable mismatch narrows to a single operator, load
+`references/operator-accuracy-triage.md` before attributing the issue to the
+operator implementation.
 
 When useful, read an earlier readiness snapshot such as `env.lock.json` and any
 available run reports. If `factory_root` is provided or discoverable, use
@@ -163,6 +167,7 @@ Load these references when needed:
 - `references/ascend-precision-notes.md`
 - `references/validation-ladder.md`
 - `references/consistency-validation.md`
+- `references/operator-accuracy-triage.md`
 
 ## Scripts
 
